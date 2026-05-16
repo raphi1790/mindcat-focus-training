@@ -1,10 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useAuth } from './contexts/AuthContext';
+import Login from './components/Login';
+import PreTestScreen from './components/PreTestScreen';
 import ChildANT from './components/ChildANT';
 import TrainingGrid from './components/TrainingGrid';
 import MazeExercise from './components/MazeExercise';
+import { saveSessionData, getTestResults } from './services/firebaseService';
 
 const VIEWS = {
   DASHBOARD: 'DASHBOARD',
+  PRE_TEST: 'PRE_TEST',
   CHILD_ANT: 'CHILD_ANT',
   SIDE_EXERCISE: 'SIDE_EXERCISE',
   MAZE_EXERCISE: 'MAZE_EXERCISE'
@@ -17,23 +22,72 @@ const TABS = {
 };
 
 export default function App() {
+  const { currentUser, logout } = useAuth();
+  
   const [currentView, setCurrentView] = useState(VIEWS.DASHBOARD);
   const [activeTab, setActiveTab] = useState(TABS.TESTS);
   
-  // Minimal state to store results locally for now
+  const [activeSession, setActiveSession] = useState({ moduleToStart: null, childId: null });
   const [results, setResults] = useState([]);
+  const [loadingResults, setLoadingResults] = useState(false);
 
-  const handleModuleComplete = (moduleName, data) => {
-    if (!data.cancel) {
-      setResults(prev => [...prev, { module: moduleName, date: new Date().toLocaleString(), ...data }]);
+  useEffect(() => {
+    if (activeTab === TABS.RESULTS && currentUser) {
+      const loadResults = async () => {
+        setLoadingResults(true);
+        const data = await getTestResults(currentUser.uid);
+        setResults(data);
+        setLoadingResults(false);
+      };
+      loadResults();
     }
+  }, [activeTab, currentUser]);
+
+  if (!currentUser) {
+    return <Login />;
+  }
+
+  const handleStartPreTest = (moduleName) => {
+    setActiveSession({ moduleToStart: moduleName, childId: null });
+    setCurrentView(VIEWS.PRE_TEST);
+  };
+
+  const handlePreTestSubmit = (childId) => {
+    setActiveSession(prev => ({ ...prev, childId }));
+    setCurrentView(activeSession.moduleToStart);
+  };
+
+  const handlePreTestCancel = () => {
+    setActiveSession({ moduleToStart: null, childId: null });
+    setCurrentView(VIEWS.DASHBOARD);
+  };
+
+  const handleModuleComplete = async (moduleName, data) => {
+    if (!data.cancel) {
+      const sessionData = {
+        supervisorId: currentUser.uid,
+        childId: activeSession.childId || 'anonymous',
+        testType: moduleName,
+        metrics: data
+      };
+      await saveSessionData(sessionData);
+    }
+    setActiveSession({ moduleToStart: null, childId: null });
     setCurrentView(VIEWS.DASHBOARD);
   };
 
   if (currentView !== VIEWS.DASHBOARD) {
-    // Kiosk Mode: Render module fullscreen
     return (
       <div className="fixed inset-0 bg-white z-50 overflow-hidden">
+        {currentView === VIEWS.PRE_TEST && (
+          <PreTestScreen 
+            moduleName={
+              Object.keys(VIEWS).find(k => VIEWS[k] === activeSession.moduleToStart)?.replace('_', ' ') || 'Test'
+            }
+            onStart={handlePreTestSubmit}
+            onCancel={handlePreTestCancel}
+          />
+        )}
         {currentView === VIEWS.CHILD_ANT && (
           <ChildANT 
             title="Child ANT Test" 
@@ -88,9 +142,16 @@ export default function App() {
           </button>
         </nav>
 
-        <div className="mt-auto text-xs text-slate-500">
-          <p>Gamepad API aktiv.</p>
-          <p>Joystick vor Start bewegen.</p>
+        <div className="mt-auto pt-6 border-t border-slate-800">
+          <div className="text-sm font-medium text-slate-300 mb-4 truncate" title={currentUser.email}>
+            👤 {currentUser.email}
+          </div>
+          <button 
+            onClick={logout}
+            className="w-full bg-slate-800 hover:bg-red-900/50 text-slate-300 hover:text-red-400 transition-colors py-2 rounded-lg text-sm font-medium border border-slate-700 hover:border-red-900/50"
+          >
+            Logout
+          </button>
         </div>
       </div>
 
@@ -103,7 +164,9 @@ export default function App() {
             {activeTab === TABS.RESULTS && "Auswertung"}
           </h2>
           <p className="text-slate-500 mt-2 text-lg">
-            Wähle ein Modul aus und starte es im Kiosk-Modus für das Kind.
+            {activeTab !== TABS.RESULTS 
+              ? "Wähle ein Modul aus und starte es im Kiosk-Modus für das Kind."
+              : "Übersicht aller absolvierten Tests und Übungen."}
           </p>
         </header>
 
@@ -116,8 +179,8 @@ export default function App() {
                 Klassischer Flanker-Test zur Messung der exekutiven Aufmerksamkeit. Das Kind muss per Pfeiltaste bestimmen, in welche Richtung der mittlere Fisch zeigt. (24 Durchläufe)
               </p>
               <button 
-                onClick={() => setCurrentView(VIEWS.CHILD_ANT)}
-                className="w-full bg-[var(--color-primary)] text-white font-bold py-3 rounded-xl hover:bg-purple-600 transition-colors"
+                onClick={() => handleStartPreTest(VIEWS.CHILD_ANT)}
+                className="w-full bg-purple-600 text-white font-bold py-3 rounded-xl hover:bg-purple-700 transition-colors"
               >
                 Test Starten
               </button>
@@ -134,7 +197,7 @@ export default function App() {
                 Freie Navigation auf einem 10x10 Raster. Das Zielgebiet (Gras) befindet sich an den Rändern. Mit jedem Level weitet sich der Schlamm aus. Nutzt Joystick (8-Wege) oder Tastatur.
               </p>
               <button 
-                onClick={() => setCurrentView(VIEWS.SIDE_EXERCISE)}
+                onClick={() => handleStartPreTest(VIEWS.SIDE_EXERCISE)}
                 className="w-full bg-green-500 text-white font-bold py-3 rounded-xl hover:bg-green-600 transition-colors"
               >
                 Side Exercise Starten
@@ -148,7 +211,7 @@ export default function App() {
                 Labyrinth-Training auf einem 15x15 Raster. Erfordert motorische Antizipation durch Kurven und Abzweigungen. Nutzt Joystick (8-Wege) oder Tastatur.
               </p>
               <button 
-                onClick={() => setCurrentView(VIEWS.MAZE_EXERCISE)}
+                onClick={() => handleStartPreTest(VIEWS.MAZE_EXERCISE)}
                 className="w-full bg-blue-500 text-white font-bold py-3 rounded-xl hover:bg-blue-600 transition-colors"
               >
                 Maze Exercise Starten
@@ -159,7 +222,12 @@ export default function App() {
 
         {activeTab === TABS.RESULTS && (
           <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-            {results.length === 0 ? (
+            {loadingResults ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                <h3 className="text-xl font-medium text-slate-500">Lade Resultate...</h3>
+              </div>
+            ) : results.length === 0 ? (
               <div className="text-center py-12">
                 <span className="text-6xl mb-4 block">📊</span>
                 <h3 className="text-xl font-bold text-slate-400">Noch keine Resultate</h3>
@@ -170,38 +238,47 @@ export default function App() {
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b-2 border-slate-100">
-                      <th className="py-3 px-4 text-slate-500">Zeitpunkt</th>
+                      <th className="py-3 px-4 text-slate-500">Datum</th>
+                      <th className="py-3 px-4 text-slate-500">Kind-ID</th>
                       <th className="py-3 px-4 text-slate-500">Modul</th>
                       <th className="py-3 px-4 text-slate-500">Score / Info</th>
                     </tr>
                   </thead>
                   <tbody>
                     {results.map((r, i) => (
-                      <tr key={i} className="border-b border-slate-50">
-                        <td className="py-3 px-4">{r.date}</td>
-                        <td className="py-3 px-4 font-medium">{r.module}</td>
+                      <tr key={r.id || i} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                        <td className="py-3 px-4 whitespace-nowrap text-sm text-slate-600">
+                          {new Date(r.timestamp).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' })}
+                        </td>
+                        <td className="py-3 px-4 font-medium text-slate-700">
+                          <span className="bg-slate-100 px-2 py-1 rounded text-xs">{r.childId}</span>
+                        </td>
+                        <td className="py-3 px-4 font-medium text-slate-700">{r.testType}</td>
                         <td className="py-3 px-4 font-mono text-sm">
-                          {r.module === 'Child ANT' ? (
-                            <div className="grid grid-cols-2 gap-2 text-xs">
-                              <div className="bg-blue-50 p-2 rounded">
-                                <span className="text-slate-400 block uppercase text-[10px]">Alerting</span>
-                                <span className="font-bold text-blue-700">{Math.round(r.alerting)}ms</span>
+                          {r.testType === 'Child ANT' ? (
+                            <div className="flex gap-3 text-xs">
+                              <div className="flex flex-col items-center">
+                                <span className="text-slate-400 uppercase text-[10px]">Alert</span>
+                                <span className="font-bold text-blue-600">{Math.round(r.metrics?.alerting || 0)}</span>
                               </div>
-                              <div className="bg-green-50 p-2 rounded">
-                                <span className="text-slate-400 block uppercase text-[10px]">Orienting</span>
-                                <span className="font-bold text-green-700">{Math.round(r.orienting)}ms</span>
+                              <div className="flex flex-col items-center border-l border-slate-200 pl-3">
+                                <span className="text-slate-400 uppercase text-[10px]">Orient</span>
+                                <span className="font-bold text-green-600">{Math.round(r.metrics?.orienting || 0)}</span>
                               </div>
-                              <div className="bg-red-50 p-2 rounded">
-                                <span className="text-slate-400 block uppercase text-[10px]">Conflict</span>
-                                <span className="font-bold text-red-700">{Math.round(r.conflict)}ms</span>
+                              <div className="flex flex-col items-center border-l border-slate-200 pl-3">
+                                <span className="text-slate-400 uppercase text-[10px]">Conflict</span>
+                                <span className="font-bold text-red-600">{Math.round(r.metrics?.conflict || 0)}</span>
                               </div>
-                              <div className="bg-slate-50 p-2 rounded">
-                                <span className="text-slate-400 block uppercase text-[10px]">Error Rate</span>
-                                <span className="font-bold text-slate-700">{r.errorRate?.toFixed(1)}%</span>
+                              <div className="flex flex-col items-center border-l border-slate-200 pl-3">
+                                <span className="text-slate-400 uppercase text-[10px]">Error</span>
+                                <span className="font-bold text-slate-600">{r.metrics?.errorRate?.toFixed(1) || 0}%</span>
                               </div>
                             </div>
                           ) : (
-                            <span>Level: {r.highestLevelReached}, Errors: {r.errors}</span>
+                            <span className="text-slate-600 text-xs">
+                              Level: <span className="font-bold">{r.metrics?.highestLevelReached || 1}</span>, 
+                              Errors: <span className="font-bold">{r.metrics?.errors || 0}</span>
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -212,7 +289,6 @@ export default function App() {
             )}
           </div>
         )}
-
       </div>
     </div>
   );
