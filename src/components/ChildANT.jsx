@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import HoldToExit from './HoldToExit';
 import { useInput } from '../utils/useInput';
+import Fish from './Fish';
 
 const CUES = ['none', 'central', 'double', 'spatial'];
 const FLANKERS = ['neutral', 'congruent', 'incongruent'];
@@ -86,64 +87,6 @@ export default function ChildANT({ onComplete, title = "Child ANT" }) {
     }
   }, [phase, startNextBlock]);
 
-  // Advance to next phase
-  const advancePhase = useCallback(() => {
-    if (phase === PHASES.FIXATION_1) {
-      setPhase(PHASES.CUE);
-    } else if (phase === PHASES.CUE) {
-      setPhase(PHASES.ISI);
-    } else if (phase === PHASES.ISI) {
-      setPhase(PHASES.TARGET);
-      startTimeRef.current = performance.now();
-    } else if (phase === PHASES.TARGET) {
-      // If we reach here via timeout, it's a miss
-      handleResponse(null);
-    } else if (phase === PHASES.FEEDBACK) {
-      if (currentTrialIndex + 1 < trials.length) {
-        setCurrentTrialIndex(prev => prev + 1);
-        setPhase(PHASES.FIXATION_1);
-      } else {
-        // Block completed
-        if (currentBlockIndex < 3) {
-          setCurrentBlockIndex(prev => prev + 1);
-          setPhase(PHASES.INTER_BLOCK_PAUSE);
-        } else {
-          finishTest();
-        }
-      }
-    }
-  }, [phase, currentTrialIndex, trials.length, currentBlockIndex]);
-
-  // Timing logic
-  useEffect(() => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-
-    let delay = null;
-    const currentTrial = trials[currentTrialIndex];
-
-    if (phase === PHASES.FIXATION_1 && currentTrial) {
-      delay = currentTrial.fixationTime;
-    } else if (phase === PHASES.CUE) {
-      delay = 150;
-    } else if (phase === PHASES.ISI) {
-      delay = 400;
-    } else if (phase === PHASES.TARGET) {
-      delay = 1700; // max allowed time
-    } else if (phase === PHASES.FEEDBACK) {
-      delay = 1000;
-    }
-
-    if (delay !== null) {
-      timeoutRef.current = setTimeout(() => {
-        advancePhase();
-      }, delay);
-    }
-
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
-  }, [phase, currentTrialIndex, trials, advancePhase]);
-
   // Handle Input
   const handleResponse = useCallback((dir) => {
     if (phase !== PHASES.TARGET) return;
@@ -179,7 +122,7 @@ export default function ChildANT({ onComplete, title = "Child ANT" }) {
 
   useInput(handleGamepadMove, phase === PHASES.TARGET, 1000);
 
-  const finishTest = () => {
+  const finishTest = useCallback(() => {
     // Calculate ANT Scores based on Rueda (2004)
     // using median RTs for CORRECT trials only
     const correctTrials = results.filter(r => r.correct === true);
@@ -197,7 +140,7 @@ export default function ChildANT({ onComplete, title = "Child ANT" }) {
     
     const errors = results.filter(r => r.correct === false).length;
     const misses = results.filter(r => r.correct === null).length;
-    const errorRate = ((errors + misses) / results.length) * 100;
+    const errorRate = results.length > 0 ? ((errors + misses) / results.length) * 100 : 0;
 
     onComplete({
       alerting,
@@ -206,7 +149,65 @@ export default function ChildANT({ onComplete, title = "Child ANT" }) {
       errorRate,
       rawResults: results
     });
-  };
+  }, [results, onComplete]);
+
+  // Advance to next phase
+  const advancePhase = useCallback(() => {
+    if (phase === PHASES.FIXATION_1) {
+      setPhase(PHASES.CUE);
+    } else if (phase === PHASES.CUE) {
+      setPhase(PHASES.ISI);
+    } else if (phase === PHASES.ISI) {
+      setPhase(PHASES.TARGET);
+      startTimeRef.current = performance.now();
+    } else if (phase === PHASES.TARGET) {
+      // If we reach here via timeout, it's a miss
+      handleResponse(null);
+    } else if (phase === PHASES.FEEDBACK) {
+      if (currentTrialIndex + 1 < trials.length) {
+        setCurrentTrialIndex(prev => prev + 1);
+        setPhase(PHASES.FIXATION_1);
+      } else {
+        // Block completed
+        if (currentBlockIndex < 3) {
+          setCurrentBlockIndex(prev => prev + 1);
+          setPhase(PHASES.INTER_BLOCK_PAUSE);
+        } else {
+          finishTest();
+        }
+      }
+    }
+  }, [phase, currentTrialIndex, trials.length, currentBlockIndex, handleResponse, finishTest]);
+
+  // Timing logic
+  useEffect(() => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
+    let delay = null;
+    const currentTrial = trials[currentTrialIndex];
+
+    if (phase === PHASES.FIXATION_1 && currentTrial) {
+      delay = currentTrial.fixationTime;
+    } else if (phase === PHASES.CUE) {
+      delay = 150;
+    } else if (phase === PHASES.ISI) {
+      delay = 400;
+    } else if (phase === PHASES.TARGET) {
+      delay = 1700; // max allowed time
+    } else if (phase === PHASES.FEEDBACK) {
+      delay = 1000;
+    }
+
+    if (delay !== null) {
+      timeoutRef.current = setTimeout(() => {
+        advancePhase();
+      }, delay);
+    }
+
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [phase, currentTrialIndex, trials, advancePhase]);
 
   // Rendering Helpers
   const renderFishRow = (trial) => {
@@ -214,23 +215,33 @@ export default function ChildANT({ onComplete, title = "Child ANT" }) {
     const targetDir = direction;
     const flankerDir = flanker === 'incongruent' ? (direction === 'L' ? 'R' : 'L') : direction;
     
+    const getTargetStatus = () => {
+      if (phase !== PHASES.FEEDBACK) return 'neutral';
+      if (feedbackCorrect === true) return 'success';
+      if (feedbackCorrect === false || feedbackCorrect === null) return 'error';
+      return 'neutral';
+    };
+
     const getFish = (dir, isTarget) => (
-      <span key={Math.random()} style={{ transform: dir === 'R' ? 'scaleX(-1)' : 'none', display: 'inline-block' }} className="mx-2">
-        🐟
-      </span>
+      <Fish 
+        key={Math.random()} 
+        direction={dir} 
+        status={isTarget ? getTargetStatus() : 'neutral'} 
+        className="mx-1" 
+      />
     );
 
     if (flanker === 'neutral') {
       return (
-        <div className="flex text-8xl h-24 items-center justify-center">
-          <div className="w-24 opacity-0"></div><div className="w-24 opacity-0"></div>
+        <div className="flex h-24 items-center justify-center">
+          <div className="w-24 mx-1 opacity-0"></div><div className="w-24 mx-1 opacity-0"></div>
           {getFish(targetDir, true)}
-          <div className="w-24 opacity-0"></div><div className="w-24 opacity-0"></div>
+          <div className="w-24 mx-1 opacity-0"></div><div className="w-24 mx-1 opacity-0"></div>
         </div>
       );
     } else {
       return (
-        <div className="flex text-8xl h-24 items-center justify-center">
+        <div className="flex h-24 items-center justify-center">
           {getFish(flankerDir, false)}
           {getFish(flankerDir, false)}
           {getFish(targetDir, true)}
@@ -264,7 +275,7 @@ export default function ChildANT({ onComplete, title = "Child ANT" }) {
   if (!currentTrial && phase !== PHASES.INIT) return null;
 
   return (
-    <div className="flex flex-col items-center justify-center flex-1 w-full h-screen fixed inset-0 z-40 bg-slate-50 relative overflow-hidden">
+    <div className="flex flex-col items-center justify-center flex-1 w-full h-screen fixed inset-0 z-40 bg-cyan-600 relative overflow-hidden">
       <HoldToExit onExit={() => onComplete({ cancel: true })} />
 
       {/* Beta HUD */}
@@ -286,17 +297,9 @@ export default function ChildANT({ onComplete, title = "Child ANT" }) {
         {/* Center Area */}
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 h-24 flex items-center justify-center">
           {phase === PHASES.CUE && currentTrial.cue === 'central' ? (
-            <div className="text-6xl text-yellow-400 animate-pulse">⭐</div>
+            <div className="text-6xl text-yellow-300 animate-pulse">⭐</div>
           ) : (
-            <div className={`text-6xl font-light text-slate-400 ${phase === PHASES.FEEDBACK ? 'opacity-0' : 'opacity-100'}`}>+</div>
-          )}
-          
-          {phase === PHASES.FEEDBACK && (
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-5xl font-bold">
-              {feedbackCorrect === true && <span className="text-green-500">Juhu!</span>}
-              {feedbackCorrect === false && <span className="text-red-500">Oops!</span>}
-              {feedbackCorrect === null && <span className="text-slate-400">Zu langsam!</span>}
-            </div>
+            <div className={`text-6xl font-light text-white ${phase === PHASES.FEEDBACK ? 'opacity-0' : 'opacity-100'}`}>+</div>
           )}
         </div>
 

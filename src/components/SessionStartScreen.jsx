@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-export default function PreTestScreen({ moduleName, onStart, onCancel }) {
+export default function SessionStartScreen({ onStart, onCancel }) {
   const [childId, setChildId] = useState('');
   const [error, setError] = useState('');
 
@@ -32,9 +32,9 @@ export default function PreTestScreen({ moduleName, onStart, onCancel }) {
         </button>
 
         <div className="text-center mb-10">
-          <span className="text-6xl block mb-6 drop-shadow-sm">🎯</span>
-          <h2 className="text-3xl font-extrabold text-slate-800 mb-2">Test Vorbereitung</h2>
-          <p className="text-slate-500 font-medium">Modul: {moduleName}</p>
+          <span className="text-6xl block mb-6 drop-shadow-sm">🗓️</span>
+          <h2 className="text-3xl font-extrabold text-slate-800 mb-2">Trainings-Plan Starten</h2>
+          <p className="text-slate-500 font-medium">5-Tage Rueda (2005) Protokoll</p>
         </div>
         
         {error && (
@@ -58,14 +58,14 @@ export default function PreTestScreen({ moduleName, onStart, onCancel }) {
               placeholder="z.B. PROB-001"
               autoFocus
             />
-            <p className="text-xs text-slate-400 mt-3 ml-1">Diese ID wird anonymisiert gespeichert und kann dem Kind später zugeordnet werden.</p>
+            <p className="text-xs text-slate-400 mt-3 ml-1">Das System berechnet automatisch den aktuellen Trainingstag basierend auf bisherigen Sitzungen.</p>
           </div>
           
           <button 
             type="submit" 
             className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-lg py-4 rounded-2xl hover:from-purple-700 hover:to-indigo-700 transition-all shadow-lg shadow-purple-500/30 transform hover:-translate-y-0.5"
           >
-            Test jetzt starten
+            Sitzung vorbereiten
           </button>
         </form>
       </div>

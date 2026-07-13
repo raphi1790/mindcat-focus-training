@@ -34,3 +34,39 @@ export const getTestResults = async (supervisorId) => {
     return [];
   }
 };
+
+export const getChildProgress = async (supervisorId, childId) => {
+  try {
+    const q = query(
+      collection(db, "testResults"),
+      where("supervisorId", "==", supervisorId),
+      where("childId", "==", childId)
+    );
+    const querySnapshot = await getDocs(q);
+    const results = [];
+    querySnapshot.forEach((doc) => {
+      results.push(doc.data());
+    });
+    
+    // Find the highest sessionDay completed
+    let maxSessionDay = 0;
+    results.forEach(r => {
+      if (r.sessionDay && r.sessionDay > maxSessionDay) {
+        maxSessionDay = r.sessionDay;
+      }
+    });
+    
+    // Determine next session day (cap at 5 for now)
+    let nextSessionDay = maxSessionDay + 1;
+    if (nextSessionDay > 5) nextSessionDay = 5;
+    
+    return {
+      completedDays: maxSessionDay,
+      nextSessionDay: nextSessionDay,
+      history: results.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+    };
+  } catch (e) {
+    console.error("Error getting child progress: ", e);
+    return { completedDays: 0, nextSessionDay: 1, history: [] };
+  }
+};
