@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import Login from './components/Login';
 import SessionStartScreen from './components/SessionStartScreen';
@@ -112,9 +112,8 @@ export default function App() {
           />
         )}
         {currentView === VIEWS.CHILD_ANT && (
-          <ChildANT 
-            title="Child ANT Test" 
-            onComplete={(data) => handleModuleComplete('Child ANT', data)} 
+          <ChildANT
+            onComplete={(data) => handleModuleComplete('Child ANT', data)}
           />
         )}
         {currentView === VIEWS.SIDE_EXERCISE && (

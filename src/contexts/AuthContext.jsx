@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
 import { 
   auth, 
   googleProvider, 
@@ -10,6 +10,8 @@ import {
 
 const AuthContext = createContext();
 
+// TODO(Phase 1): Beim Umzug nach src/auth/ den Hook in eine eigene Datei legen.
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {

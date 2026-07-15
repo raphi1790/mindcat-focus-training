@@ -1,5 +1,3 @@
-import React from 'react';
-
 export default function Fish({ direction = 'R', status = 'neutral', className = '' }) {
   // status can be 'neutral', 'success', 'error'
   // direction 'L' or 'R'

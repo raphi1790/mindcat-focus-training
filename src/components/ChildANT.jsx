@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import HoldToExit from './HoldToExit';
 import { useInput } from '../utils/useInput';
 import Fish from './Fish';
@@ -57,11 +57,12 @@ const getMedian = (arr) => {
   return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
 
-export default function ChildANT({ onComplete, title = "Child ANT" }) {
+export default function ChildANT({ onComplete }) {
   const [currentBlockIndex, setCurrentBlockIndex] = useState(0); // 0=Practice, 1-3=Test
-  const [trials, setTrials] = useState([]);
+  // Übungsblock (24 Trials) direkt beim Mount erzeugen — kein INIT-Effekt nötig
+  const [trials, setTrials] = useState(() => generateBlockTrials().slice(0, 24));
   const [currentTrialIndex, setCurrentTrialIndex] = useState(0);
-  const [phase, setPhase] = useState(PHASES.INIT);
+  const [phase, setPhase] = useState(PHASES.FIXATION_1);
   const [results, setResults] = useState([]); // Stores all trials across all test blocks
   const [feedbackCorrect, setFeedbackCorrect] = useState(null); // true, false, null (missed)
 
@@ -79,13 +80,6 @@ export default function ChildANT({ onComplete, title = "Child ANT" }) {
     setCurrentTrialIndex(0);
     setPhase(PHASES.FIXATION_1);
   }, [currentBlockIndex]);
-
-  // Start logic
-  useEffect(() => {
-    if (phase === PHASES.INIT) {
-      startNextBlock();
-    }
-  }, [phase, startNextBlock]);
 
   // Handle Input
   const handleResponse = useCallback((dir) => {

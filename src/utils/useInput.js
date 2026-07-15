@@ -18,7 +18,7 @@ export function useInput(onMove, enabled = true, moveDelayMs = 200) {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (keys.current.hasOwnProperty(e.key)) {
+      if (Object.hasOwn(keys.current, e.key)) {
         // Prevent default scrolling for arrow keys
         e.preventDefault();
         keys.current[e.key] = true;
@@ -26,7 +26,7 @@ export function useInput(onMove, enabled = true, moveDelayMs = 200) {
     };
     
     const handleKeyUp = (e) => {
-      if (keys.current.hasOwnProperty(e.key)) {
+      if (Object.hasOwn(keys.current, e.key)) {
         keys.current[e.key] = false;
       }
     };

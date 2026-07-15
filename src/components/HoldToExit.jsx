@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 export default function HoldToExit({ onExit }) {
   const [isHolding, setIsHolding] = useState(false);
