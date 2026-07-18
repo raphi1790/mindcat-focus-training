@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   choiceFromGamepad,
+  confirmPressedFromGamepad,
   directionFromGamepad,
   type GamepadLike,
 } from './gamepad';
@@ -75,5 +76,27 @@ describe('choiceFromGamepad', () => {
   it('widersprüchliche Eingabe (L+R gleichzeitig) → null', () => {
     expect(choiceFromGamepad(pad({ pressed: [1, 0] }))).toBeNull();
     expect(choiceFromGamepad(pad({ pressed: [14, 15] }))).toBeNull();
+  });
+});
+
+describe('confirmPressedFromGamepad', () => {
+  it('neutral → false', () => {
+    expect(confirmPressedFromGamepad(pad())).toBe(false);
+  });
+
+  it('jeder der vier Arcade-Buttons (0-3) bestätigt', () => {
+    expect(confirmPressedFromGamepad(pad({ pressed: [0] }))).toBe(true);
+    expect(confirmPressedFromGamepad(pad({ pressed: [1] }))).toBe(true);
+    expect(confirmPressedFromGamepad(pad({ pressed: [2] }))).toBe(true);
+    expect(confirmPressedFromGamepad(pad({ pressed: [3] }))).toBe(true);
+  });
+
+  it('D-Pad allein bestätigt nicht', () => {
+    expect(confirmPressedFromGamepad(pad({ pressed: [12, 13, 14, 15] }))).toBe(false);
+  });
+
+  it('fehlende Buttons (kurzes Array) crashen nicht', () => {
+    const minimal: GamepadLike = { axes: [], buttons: [] };
+    expect(confirmPressedFromGamepad(minimal)).toBe(false);
   });
 });

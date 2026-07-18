@@ -30,6 +30,11 @@ export interface GamepadLike {
 const DPAD = { up: 12, down: 13, left: 14, right: 15 } as const;
 const ARCADE_LEFT = [1, 3] as const;
 const ARCADE_RIGHT = [0, 2] as const;
+/**
+ * "Bestätigen"-Eingabe für Menüs/Auswahl-Screens (z. B. Kinder-Auswahl).
+ * Dort ist L/R-Semantik irrelevant, jeder Arcade-Button bestätigt.
+ */
+const ACTION_BUTTONS = [0, 1, 2, 3] as const;
 
 function pressed(gp: GamepadLike, index: number): boolean {
   return gp.buttons[index]?.pressed === true;
@@ -82,6 +87,11 @@ export function choiceFromGamepad(
   if (left) return 'L';
   if (right) return 'R';
   return null;
+}
+
+/** Bestätigen/Auswählen (für Navigations-Menüs, nicht für den ANT). */
+export function confirmPressedFromGamepad(gp: GamepadLike): boolean {
+  return ACTION_BUTTONS.some((i) => pressed(gp, i));
 }
 
 /** Alle verbundenen Gamepads (null-bereinigt); getrennt für Testbarkeit. */
