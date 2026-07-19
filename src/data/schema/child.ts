@@ -7,6 +7,10 @@ import { ageGroupSchema, dateFromTimestamp } from './common';
  * nicht erforderlich.
  */
 
+/** Für Gruppenvergleiche im Dashboard (trainiert vs. Kontrolle). */
+export const studyGroupSchema = z.enum(['trained', 'control']);
+export type StudyGroup = z.infer<typeof studyGroupSchema>;
+
 /** Vom Betreuer editierbare Felder (Create/Update-Payload). */
 export const childInputSchema = z.object({
   displayName: z.string().trim().min(1, 'Anzeigename fehlt').max(60),
@@ -17,8 +21,7 @@ export const childInputSchema = z.object({
     .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Format YYYY-MM')
     .optional(),
   sex: z.enum(['m', 'f', 'x']).optional(),
-  /** Für Gruppenvergleiche im Dashboard (trainiert vs. Kontrolle). */
-  studyGroup: z.enum(['trained', 'control']).optional(),
+  studyGroup: studyGroupSchema.optional(),
 });
 export type ChildInput = z.infer<typeof childInputSchema>;
 

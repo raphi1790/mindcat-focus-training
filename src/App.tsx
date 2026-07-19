@@ -6,6 +6,7 @@ import MazeExercise from './components/MazeExercise';
 import { AssessmentRunner } from './assessment';
 import { ChildProvider, ChildManagement, ChildSelectionScreen, useChildContext } from './children';
 import { useChildrenProgress } from './children/useChildrenProgress';
+import { ChildDashboard } from './dashboard';
 import { getExerciseSetForAge } from './data/exerciseSet';
 import type { NextStep } from './data/progress';
 import type { AssessmentPhase } from './data/schema';
@@ -346,36 +347,37 @@ function DashboardShell() {
         )}
 
         {activeTab === TABS.PROGRESS && (
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-            {!childProgress ? (
-              <p className="text-slate-400">Lade Fortschritt…</p>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                <div className="p-4 rounded-xl bg-slate-50">
-                  <div className="text-xs uppercase text-slate-400 font-bold mb-1">Baseline</div>
-                  <div className="text-lg font-bold text-slate-700">
-                    {childProgress.baselineDone ? 'Erledigt' : 'Offen'}
+          <div className="space-y-6">
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
+              {!childProgress ? (
+                <p className="text-slate-400">Lade Fortschritt…</p>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                  <div className="p-4 rounded-xl bg-slate-50">
+                    <div className="text-xs uppercase text-slate-400 font-bold mb-1">Baseline</div>
+                    <div className="text-lg font-bold text-slate-700">
+                      {childProgress.baselineDone ? 'Erledigt' : 'Offen'}
+                    </div>
+                  </div>
+                  <div className="p-4 rounded-xl bg-slate-50">
+                    <div className="text-xs uppercase text-slate-400 font-bold mb-1">Trainingstage</div>
+                    <div className="text-lg font-bold text-slate-700">{childProgress.completedDays} / 5</div>
+                  </div>
+                  <div className="p-4 rounded-xl bg-slate-50">
+                    <div className="text-xs uppercase text-slate-400 font-bold mb-1">Post-Test</div>
+                    <div className="text-lg font-bold text-slate-700">
+                      {childProgress.postDone ? 'Erledigt' : 'Offen'}
+                    </div>
+                  </div>
+                  <div className="p-4 rounded-xl bg-slate-50">
+                    <div className="text-xs uppercase text-slate-400 font-bold mb-1">Nächster Schritt</div>
+                    <div className="text-lg font-bold text-purple-700">{childProgress.nextStep}</div>
                   </div>
                 </div>
-                <div className="p-4 rounded-xl bg-slate-50">
-                  <div className="text-xs uppercase text-slate-400 font-bold mb-1">Trainingstage</div>
-                  <div className="text-lg font-bold text-slate-700">{childProgress.completedDays} / 5</div>
-                </div>
-                <div className="p-4 rounded-xl bg-slate-50">
-                  <div className="text-xs uppercase text-slate-400 font-bold mb-1">Post-Test</div>
-                  <div className="text-lg font-bold text-slate-700">
-                    {childProgress.postDone ? 'Erledigt' : 'Offen'}
-                  </div>
-                </div>
-                <div className="p-4 rounded-xl bg-slate-50">
-                  <div className="text-xs uppercase text-slate-400 font-bold mb-1">Nächster Schritt</div>
-                  <div className="text-lg font-bold text-purple-700">{childProgress.nextStep}</div>
-                </div>
-              </div>
-            )}
-            <p className="text-xs text-slate-400 mt-6">
-              Detaillierte Prä/Post-Auswertung und Datenexport folgen in Phase 3 (Dashboard).
-            </p>
+              )}
+            </div>
+
+            <ChildDashboard uid={uid} child={activeChild} />
           </div>
         )}
       </div>

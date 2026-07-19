@@ -1,0 +1,142 @@
+import type { ReactNode } from 'react';
+import type { Child } from '../data/schema';
+import EffectComparisonChart from './charts/EffectComparisonChart';
+import GroupComparisonChart from './charts/GroupComparisonChart';
+import RtHistogramChart from './charts/RtHistogramChart';
+import TrainingProgressChart from './charts/TrainingProgressChart';
+import {
+  buildFullExportJson,
+  downloadTextFile,
+  scoresToCsv,
+  sessionsToCsv,
+  slugifyFilename,
+  trialsToCsv,
+} from './exportData';
+import { useChildDashboardData } from './useChildDashboardData';
+import { useGroupComparisonData } from './useGroupComparisonData';
+
+/**
+ * Dashboard-Auswertung eines Kindes (Plan §5.3, Phase 3): Prä/Post-Effekt,
+ * Trainingsverlauf, RT-Verteilung, Gruppenvergleich, Datenexport.
+ */
+interface ChildDashboardProps {
+  uid: string;
+  child: Child;
+}
+
+export default function ChildDashboard({ uid, child }: ChildDashboardProps) {
+  const { loading, error, assessments, sessions, effectSummary, trainingSummary, histogram } =
+    useChildDashboardData(uid, child.id);
+  const group = useGroupComparisonData(uid);
+
+  if (loading) {
+    return <p className="text-slate-400">Auswertung wird geladen…</p>;
+  }
+  if (error) {
+    return <p className="text-red-500">{error}</p>;
+  }
+
+  const hasAnyData = assessments.length > 0 || sessions.length > 0;
+  if (!hasAnyData) {
+    return <p className="text-slate-400">Noch keine Daten für {child.displayName} vorhanden.</p>;
+  }
+
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  const slug = slugifyFilename(child.displayName);
+
+  const exportTrialsCsv = () =>
+    downloadTextFile(`${slug}-trials-${dateStamp}.csv`, trialsToCsv(assessments), 'text/csv;charset=utf-8');
+  const exportScoresCsv = () =>
+    downloadTextFile(`${slug}-scores-${dateStamp}.csv`, scoresToCsv(assessments), 'text/csv;charset=utf-8');
+  const exportSessionsCsv = () =>
+    downloadTextFile(
+      `${slug}-trainingssitzungen-${dateStamp}.csv`,
+      sessionsToCsv(sessions),
+      'text/csv;charset=utf-8',
+    );
+  const exportFullJson = () => {
+    const json = buildFullExportJson(child, assessments, sessions);
+    downloadTextFile(`${slug}-rohdaten-${dateStamp}.json`, JSON.stringify(json, null, 2), 'application/json');
+  };
+
+  return (
+    <div className="space-y-6">
+      <Section title="Prä-vs-Post-Effekt">
+        {effectSummary ? (
+          <EffectComparisonChart summary={effectSummary} />
+        ) : (
+          <p className="text-slate-400 text-sm">
+            Für den Effektvergleich werden ein gültiger Baseline- und ein gültiger Post-Test benötigt.
+          </p>
+        )}
+      </Section>
+
+      <Section title="Trainingsverlauf">
+        <TrainingProgressChart summary={trainingSummary} />
+      </Section>
+
+      <Section title="RT-Verteilung (korrekte Trials)">
+        {histogram ? (
+          <RtHistogramChart histogram={histogram} />
+        ) : (
+          <p className="text-slate-400 text-sm">Noch keine auswertbaren Testläufe vorhanden.</p>
+        )}
+      </Section>
+
+      <Section title="Gruppenvergleich (trainiert vs. Kontrolle)">
+        {group.loading ? (
+          <p className="text-slate-400 text-sm">Lädt…</p>
+        ) : group.entries.length > 0 ? (
+          <GroupComparisonChart entries={group.entries} />
+        ) : (
+          <p className="text-slate-400 text-sm">
+            Für einen Gruppenvergleich mindestens ein Kind mit Studiengruppe (trainiert/Kontrolle) und
+            gültigem Prä/Post-Test anlegen.
+          </p>
+        )}
+      </Section>
+
+      <Section title="Datenexport">
+        <p className="text-slate-500 text-sm mb-4">
+          Rohdaten für externe statistische Auswertung — vollständige Trial-Logs und Scores.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <ExportButton onClick={exportTrialsCsv} label="Trials (CSV)" />
+          <ExportButton onClick={exportScoresCsv} label="Scores (CSV)" />
+          <ExportButton onClick={exportSessionsCsv} label="Trainingssitzungen (CSV)" />
+          <ExportButton onClick={exportFullJson} label="Alles (JSON)" primary />
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+      <h3 className="font-bold text-slate-700 mb-4">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function ExportButton({
+  onClick,
+  label,
+  primary = false,
+}: {
+  onClick: () => void;
+  label: string;
+  primary?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
+        primary ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+      }`}
+    >
+      ⬇ {label}
+    </button>
+  );
+}
