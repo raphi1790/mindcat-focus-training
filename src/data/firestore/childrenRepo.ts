@@ -14,6 +14,7 @@ import {
   type ChildInput,
 } from '../schema';
 import { childDoc, childrenCollection } from './paths';
+import { stripUndefinedDeep } from './serialize';
 
 /**
  * Kinder-Verwaltung (Teil 2 des Plans).
@@ -22,7 +23,7 @@ import { childDoc, childrenCollection } from './paths';
  */
 
 export async function createChild(uid: string, input: ChildInput): Promise<string> {
-  const payload = childInputSchema.parse(input);
+  const payload = stripUndefinedDeep(childInputSchema.parse(input));
   const ref = await addDoc(childrenCollection(db, uid), {
     ...payload,
     createdAt: serverTimestamp(),
@@ -45,7 +46,7 @@ export async function updateChild(
   childId: string,
   input: Partial<ChildInput>,
 ): Promise<void> {
-  const payload = childInputSchema.partial().parse(input);
+  const payload = stripUndefinedDeep(childInputSchema.partial().parse(input));
   await updateDoc(childDoc(db, uid, childId), payload);
 }
 

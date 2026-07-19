@@ -7,6 +7,7 @@ import {
   type AssessmentInput,
 } from '../schema';
 import { assessmentsCollection } from './paths';
+import { stripUndefinedDeep } from './serialize';
 
 /**
  * ANT-Läufe (Baseline/Post/Interim). Append-only: Die Security Rules
@@ -18,7 +19,7 @@ export async function addAssessment(
   childId: string,
   input: AssessmentInput,
 ): Promise<string> {
-  const payload = assessmentInputSchema.parse(input);
+  const payload = stripUndefinedDeep(assessmentInputSchema.parse(input));
   const ref = await addDoc(assessmentsCollection(db, uid, childId), {
     ...payload,
     timestamp: serverTimestamp(),

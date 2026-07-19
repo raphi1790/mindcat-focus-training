@@ -7,6 +7,7 @@ import {
   type TrainingSessionInput,
 } from '../schema';
 import { trainingSessionsCollection } from './paths';
+import { stripUndefinedDeep } from './serialize';
 
 /** Trainingstage. Append-only (siehe firestore.rules). */
 
@@ -15,7 +16,7 @@ export async function addTrainingSession(
   childId: string,
   input: TrainingSessionInput,
 ): Promise<string> {
-  const payload = trainingSessionInputSchema.parse(input);
+  const payload = stripUndefinedDeep(trainingSessionInputSchema.parse(input));
   const ref = await addDoc(trainingSessionsCollection(db, uid, childId), {
     ...payload,
     timestamp: serverTimestamp(),

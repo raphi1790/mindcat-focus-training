@@ -1,35 +1,34 @@
 import { useMemo, useState } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import Login from './components/Login';
-import ChildANT from './components/ChildANT';
 import TrainingGrid from './components/TrainingGrid';
 import MazeExercise from './components/MazeExercise';
+import { AssessmentRunner } from './assessment';
 import { ChildProvider, ChildManagement, ChildSelectionScreen, useChildContext } from './children';
 import { useChildrenProgress } from './children/useChildrenProgress';
 import { getExerciseSetForAge } from './data/exerciseSet';
 import type { NextStep } from './data/progress';
+import type { AssessmentPhase } from './data/schema';
 
 /**
- * App-Shell (Phase 1): Kinder-Auswahl ersetzt den Frei-Text-SessionStartScreen.
+ * App-Shell: Kinder-Auswahl (Phase 1) + Assessment-Orchestrierung (Phase 2).
  * Nach Auswahl ist ein childId aktiv (ChildProvider/ChildContext); alle
- * Reads/Writes für Kinder-Stammdaten laufen über childrenRepo unter
- * users/{uid}/children/{childId}/... (Plan §4).
+ * Reads/Writes laufen unter users/{uid}/children/{childId}/... (Plan §4).
  *
- * ANT/Training-Ergebnisse: Die bestehenden Komponenten (ChildANT,
- * TrainingGrid, MazeExercise) liefern noch nicht die Felder, die das neue
- * assessments/trainingSessions-Schema verlangt (u. a. onset-genaue
- * Zeitstempel, Seed, Per-Level-Stats) — deren Persistierung ist laut
- * Phasenplan explizit Phase 2 (ANT-Härtung) bzw. Phase 4 (ExerciseEngine).
- * Diese Phase belässt es daher bewusst bei der Kind-Skopierung: Die alte
- * flache `testResults`-Collection (services/firebaseService.js) wird nicht
- * mehr verwendet und ist als deprecated markiert; echte Persistierung der
- * Testergebnisse folgt in Phase 2/4.
+ * ANT-Läufe werden über den AssessmentRunner ausgeführt und als
+ * `assessments`-Dokumente persistiert (Plan §5.2): fehlt die Baseline, plant
+ * "Sitzung starten" zuerst den Baseline-ANT; nach Trainingstag 5 den
+ * Post-ANT. Der Standalone-Start aus dem Tests-Tab läuft als `interim`.
+ *
+ * Trainings-Ergebnisse (TrainingGrid, MazeExercise) liefern noch keine
+ * schema-vollständigen Daten (Per-Level-Stats) — deren Persistierung folgt
+ * laut Phasenplan in Phase 4 (ExerciseEngine).
  */
 
 // Interne Modul-Navigation innerhalb des Dashboards eines aktiven Kindes.
 // Der Wechsel zwischen Kind-Auswahl/-Verwaltung und Dashboard läuft separat
 // über AppShell (activeChild/managing), nicht über diesen Typ.
-type ModuleView = 'DASHBOARD' | 'CHILD_ANT' | 'SIDE_EXERCISE' | 'MAZE_EXERCISE';
+type ModuleView = 'DASHBOARD' | 'ASSESSMENT' | 'SIDE_EXERCISE' | 'MAZE_EXERCISE';
 
 const TABS = {
   TRAINING_PLAN: 'TRAINING_PLAN',
@@ -59,11 +58,11 @@ const EXERCISE_LABELS: Record<string, string> = {
 function buildQueueForStep(nextStep: NextStep): ModuleView[] {
   switch (nextStep) {
     case 'baseline':
-      return ['CHILD_ANT'];
+      return ['ASSESSMENT'];
     case 'training':
       return ['SIDE_EXERCISE', 'MAZE_EXERCISE'];
     case 'post':
-      return ['CHILD_ANT'];
+      return ['ASSESSMENT'];
     case 'done':
       return [];
   }
@@ -84,9 +83,12 @@ function DashboardShell() {
   const [activeTab, setActiveTab] = useState<Tab>(TABS.TRAINING_PLAN);
   const [queue, setQueue] = useState<ModuleView[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
+  // Phase des aktuell laufenden ANT (baseline/post aus dem Fortschritt,
+  // interim beim Standalone-Start aus dem Tests-Tab).
+  const [assessmentPhase, setAssessmentPhase] = useState<AssessmentPhase>('interim');
 
   const childId = activeChild?.id ?? null;
-  const { progress } = useChildrenProgress(uid, childId ? [childId] : []);
+  const { progress, refresh: refreshProgress } = useChildrenProgress(uid, childId ? [childId] : []);
   const childProgress = childId ? progress[childId] : undefined;
 
   const exerciseSet = useMemo(
@@ -108,12 +110,19 @@ function DashboardShell() {
     if (!childProgress) return;
     const q = buildQueueForStep(childProgress.nextStep);
     if (q.length === 0) return;
+    if (childProgress.nextStep === 'baseline' || childProgress.nextStep === 'post') {
+      setAssessmentPhase(childProgress.nextStep);
+    }
     setQueue(q);
     setQueueIndex(0);
     setView(q[0] as ModuleView);
   };
 
   const handleStandaloneStart = (moduleView: ModuleView) => {
+    if (moduleView === 'ASSESSMENT') {
+      // Freier Einzelstart außerhalb des Studienablaufs → Interim-Messung.
+      setAssessmentPhase('interim');
+    }
     setQueue([moduleView]);
     setQueueIndex(0);
     setView(moduleView);
@@ -125,18 +134,7 @@ function DashboardShell() {
     setView('DASHBOARD');
   };
 
-  const handleModuleComplete = (moduleName: string, data: ModuleCompletion) => {
-    if (data.cancel) {
-      handleSessionCancel();
-      return;
-    }
-
-    // TODO(Phase 2/4): Ergebnis über assessmentsRepo/trainingSessionsRepo
-    // unter users/{uid}/children/{childId}/... persistieren, sobald
-    // ChildANT/TrainingGrid/MazeExercise schema-vollständige Daten liefern
-    // (onset-genaue RTs+Seed für den ANT; Per-Level-Stats für die Übungen).
-    console.info(`[${moduleName}] abgeschlossen (Persistierung folgt in Phase 2/4):`, data);
-
+  const advanceQueue = () => {
     const nextIndex = queueIndex + 1;
     if (nextIndex < queue.length) {
       setQueueIndex(nextIndex);
@@ -146,11 +144,38 @@ function DashboardShell() {
     }
   };
 
+  const handleAssessmentFinished = () => {
+    // Gespeichertes Assessment ändert den Studienfortschritt (Baseline/Post).
+    refreshProgress();
+    advanceQueue();
+  };
+
+  const handleModuleComplete = (moduleName: string, data: ModuleCompletion) => {
+    if (data.cancel) {
+      handleSessionCancel();
+      return;
+    }
+
+    // TODO(Phase 4): Trainings-Ergebnisse über trainingSessionsRepo
+    // persistieren, sobald die ExerciseEngine schema-vollständige Daten
+    // liefert (Per-Level-Stats, Trial-to-Advance-Rate).
+    console.info(`[${moduleName}] abgeschlossen (Persistierung folgt in Phase 4):`, data);
+
+    advanceQueue();
+  };
+
   if (view !== 'DASHBOARD') {
     return (
       <div className="fixed inset-0 bg-white z-50 overflow-hidden">
-        {view === 'CHILD_ANT' && (
-          <ChildANT onComplete={(data: ModuleCompletion) => handleModuleComplete('Child ANT', data)} />
+        {view === 'ASSESSMENT' && (
+          <AssessmentRunner
+            uid={uid}
+            childId={activeChild.id}
+            ageGroup={activeChild.ageGroup}
+            phase={assessmentPhase}
+            onFinished={handleAssessmentFinished}
+            onCancel={handleSessionCancel}
+          />
         )}
         {view === 'SIDE_EXERCISE' && (
           <TrainingGrid onComplete={(data: ModuleCompletion) => handleModuleComplete('Side Exercise', data)} />
@@ -279,10 +304,11 @@ function DashboardShell() {
               <div className="text-5xl mb-4">🐟</div>
               <h3 className="text-2xl font-bold mb-2">Child ANT</h3>
               <p className="text-slate-600 mb-6 flex-1 text-sm">
-                Klassischer Flanker-Test zur Messung der exekutiven Aufmerksamkeit.
+                Klassischer Flanker-Test zur Messung der exekutiven Aufmerksamkeit. Läuft hier als
+                Interim-Messung (zählt nicht als Baseline/Post).
               </p>
               <button
-                onClick={() => handleStandaloneStart('CHILD_ANT')}
+                onClick={() => handleStandaloneStart('ASSESSMENT')}
                 className="w-full bg-purple-600 text-white font-bold py-3 rounded-xl hover:bg-purple-700 transition-colors"
               >
                 Starten

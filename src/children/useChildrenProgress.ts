@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getChildProgress } from '../data/firestore';
 import type { ChildProgress } from '../data/progress';
 
@@ -6,9 +6,12 @@ import type { ChildProgress } from '../data/progress';
 export function useChildrenProgress(
   uid: string | null,
   childIds: readonly string[],
-): { progress: Record<string, ChildProgress>; loading: boolean } {
+): { progress: Record<string, ChildProgress>; loading: boolean; refresh: () => void } {
   const [progress, setProgress] = useState<Record<string, ChildProgress>>({});
   const [loading, setLoading] = useState(false);
+  // Manuelles Neuladen, z. B. nachdem ein Assessment gespeichert wurde.
+  const [reloadCount, setReloadCount] = useState(0);
+  const refresh = useCallback(() => setReloadCount((c) => c + 1), []);
   // Stabiler Dependency-Key statt der Array-Referenz (die sich bei jedem
   // Render neu bilden kann, auch wenn der Inhalt gleich bleibt).
   const idsKey = useMemo(() => childIds.join(','), [childIds]);
@@ -44,7 +47,7 @@ export function useChildrenProgress(
     return () => {
       cancelled = true;
     };
-  }, [uid, idsKey]);
+  }, [uid, idsKey, reloadCount]);
 
-  return { progress, loading };
+  return { progress, loading, refresh };
 }
