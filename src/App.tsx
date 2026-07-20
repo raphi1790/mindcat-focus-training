@@ -1,18 +1,19 @@
 import { useMemo, useState } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import Login from './components/Login';
-import TrainingGrid from './components/TrainingGrid';
-import MazeExercise from './components/MazeExercise';
 import { AssessmentRunner } from './assessment';
 import { ChildProvider, ChildManagement, ChildSelectionScreen, useChildContext } from './children';
 import { useChildrenProgress } from './children/useChildrenProgress';
 import { ChildDashboard } from './dashboard';
 import { getExerciseSetForAge } from './data/exerciseSet';
 import type { NextStep } from './data/progress';
-import type { AssessmentPhase } from './data/schema';
+import type { AssessmentPhase, ExerciseId } from './data/schema';
+import { generateSeed } from './platform/rng';
+import { buildTrainingPlan, EXERCISE_COMPONENTS, EXERCISE_ICONS, EXERCISE_LABELS, TrainingSessionRunner } from './training';
 
 /**
- * App-Shell: Kinder-Auswahl (Phase 1) + Assessment-Orchestrierung (Phase 2).
+ * App-Shell: Kinder-Auswahl (Phase 1) + Assessment-Orchestrierung (Phase 2)
+ * + Trainings-Orchestrierung (Phase 4).
  * Nach Auswahl ist ein childId aktiv (ChildProvider/ChildContext); alle
  * Reads/Writes laufen unter users/{uid}/children/{childId}/... (Plan §4).
  *
@@ -21,15 +22,17 @@ import type { AssessmentPhase } from './data/schema';
  * "Sitzung starten" zuerst den Baseline-ANT; nach Trainingstag 5 den
  * Post-ANT. Der Standalone-Start aus dem Tests-Tab läuft als `interim`.
  *
- * Trainings-Ergebnisse (TrainingGrid, MazeExercise) liefern noch keine
- * schema-vollständigen Daten (Per-Level-Stats) — deren Persistierung folgt
- * laut Phasenplan in Phase 4 (ExerciseEngine).
+ * Trainingstage laufen über `TrainingSessionRunner`: der `buildTrainingPlan`-
+ * Scheduler bestimmt die Übungen des jeweils nächsten Tages, das Ergebnis
+ * wird als vollständiges `trainingSessions`-Dokument persistiert. Freie
+ * Einzelübungen aus dem "Einzeltests"-Tab laufen standalone (ohne
+ * Persistierung, analog zur Interim-Messung des ANT).
  */
 
 // Interne Modul-Navigation innerhalb des Dashboards eines aktiven Kindes.
 // Der Wechsel zwischen Kind-Auswahl/-Verwaltung und Dashboard läuft separat
 // über AppShell (activeChild/managing), nicht über diesen Typ.
-type ModuleView = 'DASHBOARD' | 'ASSESSMENT' | 'SIDE_EXERCISE' | 'MAZE_EXERCISE';
+type ModuleView = 'DASHBOARD' | 'ASSESSMENT' | 'TRAINING_SESSION' | 'STANDALONE_EXERCISE';
 
 const TABS = {
   TRAINING_PLAN: 'TRAINING_PLAN',
@@ -38,34 +41,16 @@ const TABS = {
 } as const;
 type Tab = (typeof TABS)[keyof typeof TABS];
 
-interface ModuleCompletion {
-  cancel?: boolean;
-  [key: string]: unknown;
-}
-
-const EXERCISE_LABELS: Record<string, string> = {
-  side: 'Side (Motorische Kontrolle)',
-  chase: 'Chase (Verfolgung)',
-  maze: 'Maze (Antizipation/Planung)',
-  'anticipation-visible': 'Anticipation – sichtbar',
-  'anticipation-invisible': 'Anticipation – unsichtbar',
-  discrimination: 'Discrimination',
-  'discrimination-delay': 'Discrimination – Delay',
-  number: 'Number',
-  'number-stroop': 'Number-Stroop',
-  farmer: 'Farmer (Go/No-Go)',
-};
-
-function buildQueueForStep(nextStep: NextStep): ModuleView[] {
+function moduleForStep(nextStep: NextStep): ModuleView | null {
   switch (nextStep) {
     case 'baseline':
-      return ['ASSESSMENT'];
+      return 'ASSESSMENT';
     case 'training':
-      return ['SIDE_EXERCISE', 'MAZE_EXERCISE'];
+      return 'TRAINING_SESSION';
     case 'post':
-      return ['ASSESSMENT'];
+      return 'ASSESSMENT';
     case 'done':
-      return [];
+      return null;
   }
 }
 
@@ -82,11 +67,13 @@ function DashboardShell() {
 
   const [view, setView] = useState<ModuleView>('DASHBOARD');
   const [activeTab, setActiveTab] = useState<Tab>(TABS.TRAINING_PLAN);
-  const [queue, setQueue] = useState<ModuleView[]>([]);
-  const [queueIndex, setQueueIndex] = useState(0);
   // Phase des aktuell laufenden ANT (baseline/post aus dem Fortschritt,
   // interim beim Standalone-Start aus dem Tests-Tab).
   const [assessmentPhase, setAssessmentPhase] = useState<AssessmentPhase>('interim');
+  // Freier Einzelstart einer Übung aus dem Tests-Tab (Seed fix pro Lauf).
+  const [standaloneExercise, setStandaloneExercise] = useState<{ id: ExerciseId; seed: string } | null>(
+    null,
+  );
 
   const childId = activeChild?.id ?? null;
   const { progress, refresh: refreshProgress } = useChildrenProgress(uid, childId ? [childId] : []);
@@ -94,6 +81,10 @@ function DashboardShell() {
 
   const exerciseSet = useMemo(
     () => (activeChild ? getExerciseSetForAge(activeChild.ageGroup) : []),
+    [activeChild],
+  );
+  const trainingPlan = useMemo(
+    () => (activeChild ? buildTrainingPlan(activeChild.ageGroup) : []),
     [activeChild],
   );
 
@@ -109,63 +100,51 @@ function DashboardShell() {
 
   const handleStartSession = () => {
     if (!childProgress) return;
-    const q = buildQueueForStep(childProgress.nextStep);
-    if (q.length === 0) return;
+    const moduleView = moduleForStep(childProgress.nextStep);
+    if (!moduleView) return;
     if (childProgress.nextStep === 'baseline' || childProgress.nextStep === 'post') {
       setAssessmentPhase(childProgress.nextStep);
     }
-    setQueue(q);
-    setQueueIndex(0);
-    setView(q[0] as ModuleView);
-  };
-
-  const handleStandaloneStart = (moduleView: ModuleView) => {
-    if (moduleView === 'ASSESSMENT') {
-      // Freier Einzelstart außerhalb des Studienablaufs → Interim-Messung.
-      setAssessmentPhase('interim');
-    }
-    setQueue([moduleView]);
-    setQueueIndex(0);
     setView(moduleView);
   };
 
-  const handleSessionCancel = () => {
-    setQueue([]);
-    setQueueIndex(0);
-    setView('DASHBOARD');
+  const handleStandaloneAssessment = () => {
+    // Freier Einzelstart außerhalb des Studienablaufs → Interim-Messung.
+    setAssessmentPhase('interim');
+    setView('ASSESSMENT');
   };
 
-  const advanceQueue = () => {
-    const nextIndex = queueIndex + 1;
-    if (nextIndex < queue.length) {
-      setQueueIndex(nextIndex);
-      setView(queue[nextIndex] as ModuleView);
-    } else {
-      handleSessionCancel();
-    }
+  const handleStandaloneExercise = (id: ExerciseId) => {
+    setStandaloneExercise({ id, seed: generateSeed() });
+    setView('STANDALONE_EXERCISE');
+  };
+
+  const handleSessionCancel = () => {
+    setStandaloneExercise(null);
+    setView('DASHBOARD');
   };
 
   const handleAssessmentFinished = () => {
     // Gespeichertes Assessment ändert den Studienfortschritt (Baseline/Post).
     refreshProgress();
-    advanceQueue();
+    setView('DASHBOARD');
   };
 
-  const handleModuleComplete = (moduleName: string, data: ModuleCompletion) => {
-    if (data.cancel) {
-      handleSessionCancel();
-      return;
-    }
+  const handleTrainingSessionFinished = () => {
+    // Gespeicherte Trainingssitzung ändert den Studienfortschritt (Tag n/5).
+    refreshProgress();
+    setView('DASHBOARD');
+  };
 
-    // TODO(Phase 4): Trainings-Ergebnisse über trainingSessionsRepo
-    // persistieren, sobald die ExerciseEngine schema-vollständige Daten
-    // liefert (Per-Level-Stats, Trial-to-Advance-Rate).
-    console.info(`[${moduleName}] abgeschlossen (Persistierung folgt in Phase 4):`, data);
-
-    advanceQueue();
+  const handleStandaloneExerciseComplete = () => {
+    setStandaloneExercise(null);
+    setView('DASHBOARD');
   };
 
   if (view !== 'DASHBOARD') {
+    const StandaloneComponent = standaloneExercise ? EXERCISE_COMPONENTS[standaloneExercise.id] : null;
+    const dayExercises = trainingPlan[(childProgress?.nextSessionDay ?? 1) - 1] ?? [];
+
     return (
       <div className="fixed inset-0 bg-white z-50 overflow-hidden">
         {view === 'ASSESSMENT' && (
@@ -178,11 +157,24 @@ function DashboardShell() {
             onCancel={handleSessionCancel}
           />
         )}
-        {view === 'SIDE_EXERCISE' && (
-          <TrainingGrid onComplete={(data: ModuleCompletion) => handleModuleComplete('Side Exercise', data)} />
+        {view === 'TRAINING_SESSION' && (
+          <TrainingSessionRunner
+            uid={uid}
+            childId={activeChild.id}
+            ageGroup={activeChild.ageGroup}
+            sessionDay={childProgress?.nextSessionDay ?? 1}
+            exerciseIds={dayExercises}
+            onFinished={handleTrainingSessionFinished}
+            onCancel={handleSessionCancel}
+          />
         )}
-        {view === 'MAZE_EXERCISE' && (
-          <MazeExercise onComplete={(data: ModuleCompletion) => handleModuleComplete('Maze Exercise', data)} />
+        {view === 'STANDALONE_EXERCISE' && standaloneExercise && StandaloneComponent && (
+          <StandaloneComponent
+            ageGroup={activeChild.ageGroup}
+            seed={standaloneExercise.seed}
+            onComplete={handleStandaloneExerciseComplete}
+            onCancel={handleSessionCancel}
+          />
         )}
       </div>
     );
@@ -288,13 +280,10 @@ function DashboardShell() {
                 {exerciseSet.map((id) => (
                   <li key={id} className="flex items-center gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                    {EXERCISE_LABELS[id] ?? id}
+                    {EXERCISE_LABELS[id]}
                   </li>
                 ))}
               </ul>
-              <p className="text-xs text-slate-400 mt-4">
-                Die meisten Übungen sind noch nicht implementiert (Phase 4). Aktuell spielbar: Side, Maze.
-              </p>
             </div>
           </div>
         )}
@@ -309,40 +298,28 @@ function DashboardShell() {
                 Interim-Messung (zählt nicht als Baseline/Post).
               </p>
               <button
-                onClick={() => handleStandaloneStart('ASSESSMENT')}
+                onClick={handleStandaloneAssessment}
                 className="w-full bg-purple-600 text-white font-bold py-3 rounded-xl hover:bg-purple-700 transition-colors"
               >
                 Starten
               </button>
             </div>
 
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
-              <div className="text-5xl mb-4">🐱</div>
-              <h3 className="text-2xl font-bold mb-2">Side Exercise</h3>
-              <p className="text-slate-600 mb-6 flex-1 text-sm">
-                Freie Navigation auf einem Raster mit Zielgebieten und Hindernissen.
-              </p>
-              <button
-                onClick={() => handleStandaloneStart('SIDE_EXERCISE')}
-                className="w-full bg-green-500 text-white font-bold py-3 rounded-xl hover:bg-green-600 transition-colors"
-              >
-                Starten
-              </button>
-            </div>
-
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
-              <div className="text-5xl mb-4">🧩</div>
-              <h3 className="text-2xl font-bold mb-2">Maze Exercise</h3>
-              <p className="text-slate-600 mb-6 flex-1 text-sm">
-                Labyrinth-Training. Erfordert motorische Antizipation durch Kurven.
-              </p>
-              <button
-                onClick={() => handleStandaloneStart('MAZE_EXERCISE')}
-                className="w-full bg-blue-500 text-white font-bold py-3 rounded-xl hover:bg-blue-600 transition-colors"
-              >
-                Starten
-              </button>
-            </div>
+            {exerciseSet.map((id) => (
+              <div key={id} className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+                <div className="text-5xl mb-4">{EXERCISE_ICONS[id]}</div>
+                <h3 className="text-2xl font-bold mb-2">{EXERCISE_LABELS[id]}</h3>
+                <p className="text-slate-600 mb-6 flex-1 text-sm">
+                  Freies Üben außerhalb des Studienablaufs — wird nicht als Trainingstag gespeichert.
+                </p>
+                <button
+                  onClick={() => handleStandaloneExercise(id)}
+                  className="w-full bg-green-500 text-white font-bold py-3 rounded-xl hover:bg-green-600 transition-colors"
+                >
+                  Starten
+                </button>
+              </div>
+            ))}
           </div>
         )}
 

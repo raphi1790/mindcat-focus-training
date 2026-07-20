@@ -12,3 +12,5 @@ export { useChoiceInput } from './useChoiceInput';
 export type { ChoiceEvent, ChoiceInputOptions } from './useChoiceInput';
 export { useConfirmInput } from './useConfirmInput';
 export type { ConfirmInputOptions } from './useConfirmInput';
+export { moveSelection, useArraySelectInput } from './useArraySelectInput';
+export type { ArraySelectInputOptions } from './useArraySelectInput';
