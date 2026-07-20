@@ -15,7 +15,8 @@ export type SoundName =
   | 'error' //    falsche Antwort / Schlamm
   | 'levelUp' //  Level-Aufstieg (kleine Fanfare)
   | 'star' //     Stern eingesammelt (Belohnungsschirm)
-  | 'fanfare'; // Übung/Tag geschafft (große Fanfare)
+  | 'fanfare' //  Übung/Tag geschafft (große Fanfare)
+  | 'bump'; //    Wandkontakt (Maze) — kein Fehler, nur Kollisions-Feedback
 
 interface Note {
   /** Startzeit relativ zum Abspielbeginn in Sekunden. */
@@ -57,6 +58,7 @@ const SOUNDS: Record<SoundName, Note[]> = {
     { at: 0.6, freq: 1046.5, dur: 0.42, type: 'triangle', gain: 0.2 },
     { at: 0.6, freq: 659.25, dur: 0.42, type: 'sine', gain: 0.08 },
   ],
+  bump: [{ at: 0, freq: 160, dur: 0.07, type: 'sine', gain: 0.07 }],
 };
 
 const STORAGE_KEY = 'mindcat.sound-muted';

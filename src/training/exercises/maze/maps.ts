@@ -1,6 +1,7 @@
 /**
  * Maze-Übung: Katze durch ein Labyrinth zum Futter/Gras führen.
- * 0 = Pfad, 1 = Wand (Gefahr — Berühren zählt als Fehler), 2 = Ziel, 3 = Start.
+ * 0 = Pfad, 1 = Wand (blockiert nur die Bewegung — kein Fehler, kein Reset;
+ * vgl. AP4/Befund E), 2 = Ziel, 3 = Start.
  * 6 Level (Plan §6.2: a=6, b=6, c=1) — Level 1–3 aus der bisherigen
  * `MazeExercise.jsx` migriert, Level 4–6 neu (generierte, auf Lösbarkeit
  * geprüfte Labyrinthe gleichen Stils).

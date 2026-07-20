@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { now } from '../../../platform/timing';
 import { useDirectionalInput } from '../../../platform/input';
 import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
@@ -18,20 +19,30 @@ function tileKind(value: number): GridTileKind {
 }
 
 export default function MazeExercise({ onComplete, onCancel }: ExerciseProps) {
-  const { state, recordTrial } = useExerciseEngine('maze', CONFIG, onComplete);
+  const { state, recordTrial, logEvent } = useExerciseEngine('maze', CONFIG, onComplete, {
+    logRawEvents: true,
+  });
   const [catPos, setCatPos] = useState(() => getStartPosition(1));
-  const [flash, setFlash] = useState<'success' | 'error' | null>(null);
+  const [flash, setFlash] = useState<'success' | null>(null);
+  const [bumpSeq, setBumpSeq] = useState(0);
   const gateRef = useRef(createTrialGate());
 
   const map = LEVEL_MAPS[state.level] ?? LEVEL_MAPS[1]!;
 
-  const handleTrialEnd = useCallback(
-    (success: boolean) => {
-      if (!gateRef.current.tryClose()) return;
-      setFlash(success ? 'success' : 'error');
-      recordTrial({ result: success ? 'correct' : 'error' });
+  // Trial endet ausschließlich mit Erreichen des Ziels (Befund E/AP4): Wände
+  // blockieren nur die Bewegung, sie zählen nicht mehr als Fehler.
+  const handleTrialEnd = useCallback(() => {
+    if (!gateRef.current.tryClose()) return;
+    setFlash('success');
+    recordTrial({ result: 'correct' });
+  }, [recordTrial]);
+
+  const handleBump = useCallback(
+    (x: number, y: number) => {
+      logEvent({ type: 'wallBump', level: state.level, x, y, ts: now() });
+      setBumpSeq((n) => n + 1);
     },
-    [recordTrial],
+    [logEvent, state.level],
   );
 
   const handleMove = useCallback(
@@ -41,24 +52,23 @@ export default function MazeExercise({ onComplete, onCancel }: ExerciseProps) {
       const ny = catPos.y + dy;
       if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) return;
 
-      if (dx !== 0 && dy !== 0) {
-        const tileX = map[catPos.y]?.[nx];
-        const tileY = map[ny]?.[catPos.x];
-        if (tileX === 1 && tileY === 1) {
-          handleTrialEnd(false);
-          return;
-        }
+      const tile = map[ny]?.[nx];
+      if (tile === 1) {
+        handleBump(nx, ny);
+        return;
       }
 
       setCatPos({ x: nx, y: ny });
-      const tile = map[ny]?.[nx];
-      if (tile === 1) handleTrialEnd(false);
-      else if (tile === 2) handleTrialEnd(true);
+      if (tile === 2) handleTrialEnd();
     },
-    [catPos, map, flash, handleTrialEnd],
+    [catPos, map, flash, handleBump, handleTrialEnd],
   );
 
-  useDirectionalInput(handleMove, { enabled: flash === null && !state.done, repeatDelayMs: 150 });
+  useDirectionalInput(handleMove, {
+    enabled: flash === null && !state.done,
+    repeatDelayMs: 150,
+    mode: '4-way',
+  });
 
   useEffect(() => {
     if (flash === null) return;
@@ -78,17 +88,10 @@ export default function MazeExercise({ onComplete, onCancel }: ExerciseProps) {
       tileEmoji={(x, y) => (tileKind(map[y]?.[x] ?? 0) === 'target' ? '🌿' : null)}
       catPos={catPos}
       flash={flash}
+      bump={bumpSeq}
       level={state.level}
       counter={`Labyrinth ${state.totalTrials} / ${CONFIG.minTrials} geschafft`}
-      instructions={
-        <>
-          Navigiere durch das Labyrinth zum Gras (🌿).
-          <br />
-          <span className="text-red-500 font-bold">
-            Achtung: Joystick-Diagonale erfordert Vorsicht an den Ecken!
-          </span>
-        </>
-      }
+      instructions={<>Navigiere durch das Labyrinth zum Gras (🌿). Wände halten dich nur auf.</>}
       onExit={onCancel}
     />
   );

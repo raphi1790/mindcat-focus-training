@@ -25,6 +25,8 @@ export interface UseExerciseEngineOptions {
 export interface ExerciseEngine {
   state: ExerciseProgressState;
   recordTrial: (outcome: TrialOutcome, rawEvent?: Record<string, unknown>) => void;
+  /** Rohereignis loggen, ohne einen Trial abzuschließen (z. B. Maze-Wandbumps). */
+  logEvent: (rawEvent: Record<string, unknown>) => void;
 }
 
 export function useExerciseEngine(
@@ -51,6 +53,13 @@ export function useExerciseEngine(
     [config, logRawEvents],
   );
 
+  const logEvent = useCallback(
+    (rawEvent: Record<string, unknown>) => {
+      if (logRawEvents) rawEventsRef.current.push(rawEvent);
+    },
+    [logRawEvents],
+  );
+
   useEffect(() => {
     if (state.done && !firedRef.current) {
       firedRef.current = true;
@@ -65,5 +74,5 @@ export function useExerciseEngine(
     }
   }, [state, exerciseId, logRawEvents]);
 
-  return { state, recordTrial };
+  return { state, recordTrial, logEvent };
 }

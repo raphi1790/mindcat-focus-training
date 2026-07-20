@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ExerciseHud,
   LevelUpOverlay,
@@ -30,6 +30,12 @@ export interface GridWorldProps {
   tileEmoji?: (x: number, y: number) => string | null;
   catPos: { x: number; y: number };
   flash: 'success' | 'error' | null;
+  /**
+   * Nonce, der bei jeder Wand-Kollision hochgezählt wird (Maze, AP4/Befund E):
+   * löst kurzes Shake+Sound aus, ohne Trial-Ende oder Reset (im Unterschied zu
+   * `flash: 'error'`).
+   */
+  bump?: number;
   level: number;
   /** Streak-Sterne im HUD; bei target ≤ 1 (Maze) entfällt die Anzeige. */
   streak?: { current: number; target: number };
@@ -56,6 +62,7 @@ export default function GridWorld({
   tileEmoji,
   catPos,
   flash,
+  bump = 0,
   level,
   streak,
   counter,
@@ -65,6 +72,25 @@ export default function GridWorld({
   catEmoji = '🐱',
 }: GridWorldProps) {
   const { levelUp } = useGameFeel(level, flash);
+
+  // Wand-Bump (Maze): eigener, kurzer Shake+Sound — unabhängig vom
+  // Erfolg/Fehler-`flash` (kein Trial-Ende, keine Rücksetzung der Katze).
+  const [bumping, setBumping] = useState(false);
+  const prevBump = useRef(bump);
+  const bumpTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (bump === prevBump.current) return;
+    prevBump.current = bump;
+    soundManager.play('bump');
+    setBumping(true);
+    if (bumpTimeout.current !== null) clearTimeout(bumpTimeout.current);
+    bumpTimeout.current = setTimeout(() => setBumping(false), 300);
+  }, [bump]);
+  useEffect(() => {
+    return () => {
+      if (bumpTimeout.current !== null) clearTimeout(bumpTimeout.current);
+    };
+  }, []);
 
   // Schritt-Sound bei echten Einzelschritten (Sprünge = Trial-Reset → still).
   const prevPos = useRef(catPos);
@@ -110,7 +136,7 @@ export default function GridWorld({
       <div
         className={`relative mt-16 w-[90vw] max-w-[600px] aspect-square shadow-2xl rounded-2xl overflow-hidden border-4 transition-colors ${
           flash === 'error' ? 'animate-shake border-rose-300' : 'border-white'
-        }`}
+        } ${bumping ? 'animate-shake' : ''}`}
       >
         <div
           className="grid w-full h-full"

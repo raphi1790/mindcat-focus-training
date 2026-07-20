@@ -7,21 +7,45 @@
  * useChoiceInput verwenden — dort zählt der Event-Zeitstempel.
  */
 import { useEffect, useRef } from 'react';
-import { connectedGamepads, directionFromGamepad, type Direction } from './gamepad';
+import { connectedGamepads, directionFromGamepad, type Axis, type Direction } from './gamepad';
 
 export interface DirectionalInputOptions {
   /** Eingabe aktiv? (z. B. false während Feedback-Animationen) */
   enabled?: boolean;
   /** Mindestabstand zwischen zwei Bewegungen bei gehaltener Eingabe. */
   repeatDelayMs?: number;
+  /**
+   * '4-way' verwirft Diagonalen (z. B. Maze — AP4/Befund E: ein leicht
+   * schräg gehaltener Joystick soll keine Diagonalschritte in die Wand
+   * erzeugen). Standard '8-way' (Side, Chase, Anticipation).
+   */
+  mode?: '4-way' | '8-way';
 }
 
 const ARROW_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'] as const;
 type ArrowKey = (typeof ARROW_KEYS)[number];
 
+/**
+ * Reine Auflösung einer Rohrichtung nach Eingabemodus — von der rAF-Schleife
+ * getrennt, damit die Diagonal-Filterung ohne DOM/rAF testbar ist.
+ * Liefert `null`, wenn keine Bewegung ausgelöst werden soll (keine Eingabe,
+ * oder Diagonale im '4-way'-Modus).
+ */
+export function resolveDirection(
+  dx: number,
+  dy: number,
+  mode: '4-way' | '8-way' = '8-way',
+): Direction | null {
+  const sx = Math.sign(dx) as Axis;
+  const sy = Math.sign(dy) as Axis;
+  if (sx === 0 && sy === 0) return null;
+  if (mode === '4-way' && sx !== 0 && sy !== 0) return null;
+  return { dx: sx, dy: sy };
+}
+
 export function useDirectionalInput(
   onMove: (direction: Direction) => void,
-  { enabled = true, repeatDelayMs = 200 }: DirectionalInputOptions = {},
+  { enabled = true, repeatDelayMs = 200, mode = '8-way' }: DirectionalInputOptions = {},
 ): void {
   const keys = useRef<Record<ArrowKey, boolean>>({
     ArrowUp: false,
@@ -76,15 +100,14 @@ export function useDirectionalInput(
         if (dir.dy !== 0) dy = dir.dy;
       }
 
-      const sx = Math.sign(dx);
-      const sy = Math.sign(dy);
+      const resolved = resolveDirection(dx, dy, mode);
 
-      if (enabledRef.current && (sx !== 0 || sy !== 0)) {
+      if (enabledRef.current && resolved) {
         if (time - lastMoveTime.current > repeatDelayMs) {
-          onMoveRef.current({ dx: sx as Direction['dx'], dy: sy as Direction['dy'] });
+          onMoveRef.current(resolved);
           lastMoveTime.current = time;
         }
-      } else if (sx === 0 && sy === 0) {
+      } else if (dx === 0 && dy === 0) {
         // Ohne Eingabe Timer zurücksetzen → nächster Tastendruck wirkt sofort
         lastMoveTime.current = 0;
       }
@@ -98,5 +121,5 @@ export function useDirectionalInput(
       window.removeEventListener('keyup', handleKeyUp);
       cancelAnimationFrame(rafId);
     };
-  }, [repeatDelayMs]);
+  }, [repeatDelayMs, mode]);
 }
