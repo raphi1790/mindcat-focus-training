@@ -8,7 +8,6 @@ import { ChildDashboard } from './dashboard';
 import { getExerciseSetForAge } from './data/exerciseSet';
 import type { NextStep } from './data/progress';
 import type { AssessmentPhase, ExerciseId } from './data/schema';
-import { generateSeed } from './platform/rng';
 import { buildTrainingPlan, EXERCISE_COMPONENTS, EXERCISE_ICONS, EXERCISE_LABELS, TrainingSessionRunner } from './training';
 
 /**
@@ -115,7 +114,9 @@ function DashboardShell() {
   };
 
   const handleStandaloneExercise = (id: ExerciseId) => {
-    setStandaloneExercise({ id, seed: generateSeed() });
+    // Fester Seed statt Zufalls-UUID (AP3, Fix-Plan Testrunde 1) — auch der
+    // freie Einzeltest liefert damit reproduzierbare Sequenzen.
+    setStandaloneExercise({ id, seed: `mindcat-v1:practice:${id}` });
     setView('STANDALONE_EXERCISE');
   };
 

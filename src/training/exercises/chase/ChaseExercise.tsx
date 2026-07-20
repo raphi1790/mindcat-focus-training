@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDirectionalInput } from '../../../platform/input';
-import { createRng, type Rng } from '../../../platform/rng';
+import { createTrialRng, type Rng } from '../../../platform/rng';
 import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld from '../../shared/GridWorld';
@@ -63,7 +63,6 @@ function stepRandomly(rng: Rng, pos: Pos): Pos {
 
 export default function ChaseExercise({ seed, onComplete, onCancel }: ExerciseProps) {
   const { state, recordTrial } = useExerciseEngine('chase', CONFIG, onComplete);
-  const rngRef = useRef<Rng>(createRng(seed));
   const [trialId, setTrialId] = useState(0);
   const [catPos, setCatPos] = useState<Pos>(centerPos);
   // Platzhalter — die Trial-Setup-Effekt-Funktion platziert den Schirm beim
@@ -105,6 +104,12 @@ export default function ChaseExercise({ seed, onComplete, onCancel }: ExercisePr
   useEffect(() => {
     if (state.done) return;
 
+    // Eigene Rng-Instanz je Trial (AP3): Trial `state.totalTrials` ist damit
+    // für jedes Kind identisch, unabhängig davon, wie viele Schirm-Schritte
+    // frühere Trials verbraucht haben, und ein StrictMode-Doppellauf dieses
+    // Effekts erzeugt dieselbe Sequenz erneut statt sie zu verschieben.
+    const trialRng = createTrialRng(seed, state.totalTrials);
+
     // In einer verschachtelten Funktion statt direkt im Effect-Body (vgl.
     // ChildAnt.tsx' `run()`) — das Setup reagiert auf einen neuen Trial
     // (externes Ereignis), keine reine Render-Ableitung.
@@ -112,7 +117,7 @@ export default function ChaseExercise({ seed, onComplete, onCancel }: ExercisePr
       gateRef.current.reset();
       const cat = centerPos();
       updateCatPos(cat);
-      setTargetPos(randomPos(rngRef.current, cat));
+      setTargetPos(randomPos(trialRng, cat));
       remainingRef.current = timeLimitForLevel(state.level);
       setRemainingMs(remainingRef.current);
     };
@@ -120,7 +125,7 @@ export default function ChaseExercise({ seed, onComplete, onCancel }: ExercisePr
 
     const stepMs = stepIntervalForLevel(state.level);
     const stepInterval = setInterval(() => {
-      setTargetPos((prev) => stepRandomly(rngRef.current, prev));
+      setTargetPos((prev) => stepRandomly(trialRng, prev));
     }, stepMs);
 
     const tickInterval = setInterval(() => {
@@ -138,7 +143,7 @@ export default function ChaseExercise({ seed, onComplete, onCancel }: ExercisePr
       clearInterval(stepInterval);
       clearInterval(tickInterval);
     };
-  }, [trialId, state.level, state.done, updateCatPos]);
+  }, [trialId, state.level, state.done, state.totalTrials, seed, updateCatPos]);
 
   const handleMove = useCallback(
     ({ dx, dy }: { dx: number; dy: number }) => {

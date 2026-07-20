@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDirectionalInput } from '../../../platform/input';
-import { createRng, type Rng } from '../../../platform/rng';
+import { createTrialRng, type Rng } from '../../../platform/rng';
 import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld from '../../shared/GridWorld';
@@ -48,7 +48,6 @@ interface AnticipationExerciseProps extends ExerciseProps {
 export default function AnticipationExercise({ seed, visible, onComplete, onCancel }: AnticipationExerciseProps) {
   const exerciseId = visible ? 'anticipation-visible' : 'anticipation-invisible';
   const { state, recordTrial } = useExerciseEngine(exerciseId, CONFIG, onComplete);
-  const rngRef = useRef<Rng>(createRng(seed));
   const [trialId, setTrialId] = useState(0);
   const [lane, setLane] = useState(HOME_LANE);
   const [targetLane, setTargetLane] = useState(0);
@@ -82,9 +81,12 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
   useEffect(() => {
     if (state.done) return;
 
+    // Eigene Rng-Instanz je Trial (AP3) — siehe Begründung in ChaseExercise.tsx.
+    const trialRng = createTrialRng(seed, state.totalTrials);
+
     const setupTrial = () => {
       gateRef.current.reset();
-      const target = pickTargetLane(rngRef.current, HOME_LANE);
+      const target = pickTargetLane(trialRng, HOME_LANE);
       phaseRef.current = 'approaching';
       laneRef.current = HOME_LANE;
       setLane(HOME_LANE);
@@ -121,7 +123,7 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
     }, TICK_MS);
 
     return () => clearInterval(tick);
-  }, [trialId, state.level, state.done]);
+  }, [trialId, state.level, state.done, state.totalTrials, seed]);
 
   const handleMove = useCallback(
     ({ dx }: { dx: number; dy: number }) => {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChoiceInput, type ChoiceEvent } from '../../../platform/input';
-import { createRng, type Rng } from '../../../platform/rng';
+import { createTrialRng } from '../../../platform/rng';
 import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import ExerciseScreen from '../../shared/ExerciseScreen';
@@ -50,17 +50,24 @@ function Cluster({
 
 export default function NumberStroopExercise({ seed, onComplete, onCancel }: ExerciseProps) {
   const { state, recordTrial } = useExerciseEngine('number-stroop', CONFIG, onComplete);
-  const rngRef = useRef<Rng>(createRng(seed));
   const [trialId, setTrialId] = useState(0);
   const [trial, setTrial] = useState<StroopTrial | null>(null);
   const [flash, setFlash] = useState<{ side: 'L' | 'R'; kind: 'success' | 'error' } | null>(null);
   const gateRef = useRef(createTrialGate());
 
+  // Neuer Trial: in einer verschachtelten Funktion statt direkt im
+  // Effect-Body (vgl. ChaseExercise.tsx) — das Setup reagiert auf einen neuen
+  // Trial (externes Ereignis, ausgelöst nach Ablauf der Flash-Anzeige), keine
+  // reine Render-Ableitung.
   useEffect(() => {
     if (state.done) return;
-    gateRef.current.reset();
-    setTrial(generateStroopTrial(rngRef.current, state.level));
-  }, [trialId, state.level, state.done]);
+    const setupTrial = () => {
+      gateRef.current.reset();
+      // Eigene Rng-Instanz je Trial (AP3) — siehe Begründung in ChaseExercise.tsx.
+      setTrial(generateStroopTrial(createTrialRng(seed, state.totalTrials), state.level));
+    };
+    setupTrial();
+  }, [trialId, state.level, state.done, state.totalTrials, seed]);
 
   const handleChoice = useCallback(
     ({ choice }: ChoiceEvent) => {

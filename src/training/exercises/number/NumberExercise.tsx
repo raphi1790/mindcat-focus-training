@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useArraySelectInput } from '../../../platform/input';
-import { createRng, type Rng } from '../../../platform/rng';
+import { createTrialRng } from '../../../platform/rng';
 import { useSelectionSound } from '../../../ui';
 import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
@@ -14,17 +14,24 @@ const FLASH_MS = 500;
 
 export default function NumberExercise({ seed, onComplete, onCancel }: ExerciseProps) {
   const { state, recordTrial } = useExerciseEngine('number', CONFIG, onComplete);
-  const rngRef = useRef<Rng>(createRng(seed));
   const [trialId, setTrialId] = useState(0);
   const [trial, setTrial] = useState<NumberTrial | null>(null);
   const [flash, setFlash] = useState<'success' | 'error' | null>(null);
   const gateRef = useRef(createTrialGate());
 
+  // Neuer Trial: in einer verschachtelten Funktion statt direkt im
+  // Effect-Body (vgl. ChaseExercise.tsx) — das Setup reagiert auf einen neuen
+  // Trial (externes Ereignis, ausgelöst nach Ablauf der Flash-Anzeige), keine
+  // reine Render-Ableitung.
   useEffect(() => {
     if (state.done) return;
-    gateRef.current.reset();
-    setTrial(generateNumberTrial(rngRef.current, state.level));
-  }, [trialId, state.level, state.done]);
+    const setupTrial = () => {
+      gateRef.current.reset();
+      // Eigene Rng-Instanz je Trial (AP3) — siehe Begründung in ChaseExercise.tsx.
+      setTrial(generateNumberTrial(createTrialRng(seed, state.totalTrials), state.level));
+    };
+    setupTrial();
+  }, [trialId, state.level, state.done, state.totalTrials, seed]);
 
   const handleSelect = useCallback(
     (index: number) => {

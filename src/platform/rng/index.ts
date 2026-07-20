@@ -85,6 +85,17 @@ export function createRng(seed: string): Rng {
   };
 }
 
+/**
+ * Pro-Trial-Sub-RNG: eigene Instanz je Trial-Index statt eines fortlaufenden
+ * Stroms. Trial k ist damit für jedes Kind identisch, unabhängig davon, wie
+ * viele Züge frühere Trials verbraucht haben (Laufzeit-/Performance-abhängig,
+ * z. B. Schirm-Schritte bei Chase) — und ein StrictMode-Doppellauf des
+ * Trial-Setup-Effekts erzeugt dieselbe Sequenz erneut, statt sie zu verschieben.
+ */
+export function createTrialRng(seed: string, trialIndex: number): Rng {
+  return createRng(`${seed}:trial${trialIndex}`);
+}
+
 /** Frischer, eindeutiger Seed (z. B. je Assessment) — wird persistiert. */
 export function generateSeed(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {

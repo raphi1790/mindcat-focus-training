@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { addTrainingSession } from '../data/firestore';
 import type { AgeGroup, ExerciseId, ExerciseResult, TrainingSessionInput } from '../data/schema';
-import { generateSeed } from '../platform/rng';
 import { Confetti, soundManager } from '../ui';
 import { EXERCISE_COMPONENTS } from './exercises';
 import { EXERCISE_ICONS, EXERCISE_LABELS } from './labels';
@@ -39,6 +38,16 @@ type RunnerState =
   | { step: 'saveError'; results: ExerciseResult[]; message: string }
   | { step: 'done'; results: ExerciseResult[] };
 
+/**
+ * Sitzungs-Seed ist eine feste Konstante je Trainingstag (AP3, Fix-Plan
+ * Testrunde 1): Jedes Kind sieht an Tag n exakt dieselben Sequenzen. Der Seed
+ * wird trotzdem unverändert im Session-Dokument persistiert (Reproduzierbarkeit
+ * bleibt dokumentiert, auch wenn er nicht mehr zufällig ist).
+ */
+function sessionSeedForDay(sessionDay: number): string {
+  return `mindcat-v1:day${sessionDay}`;
+}
+
 /** Eigener Seed je Übung, deterministisch aus dem Sitzungs-Seed abgeleitet. */
 function deriveExerciseSeed(sessionSeed: string, exerciseId: ExerciseId): string {
   return `${sessionSeed}:${exerciseId}`;
@@ -53,7 +62,7 @@ export default function TrainingSessionRunner({
   onFinished,
   onCancel,
 }: TrainingSessionRunnerProps) {
-  const [sessionSeed] = useState(() => generateSeed());
+  const sessionSeed = sessionSeedForDay(sessionDay);
   const [state, setState] = useState<RunnerState>({ step: 'running', index: 0, results: [] });
 
   const save = useCallback(

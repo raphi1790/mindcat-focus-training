@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfirmInput } from '../../../platform/input';
-import { createRng, type Rng } from '../../../platform/rng';
+import { createTrialRng } from '../../../platform/rng';
 import { useExerciseEngine, type TrialResultKind } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import ExerciseScreen from '../../shared/ExerciseScreen';
@@ -22,7 +22,6 @@ const FLASH_MS = 450;
 
 export default function FarmerExercise({ seed, onComplete, onCancel }: ExerciseProps) {
   const { state, recordTrial } = useExerciseEngine('farmer', CONFIG, onComplete);
-  const rngRef = useRef<Rng>(createRng(seed));
   const [trialId, setTrialId] = useState(0);
   const [trial, setTrial] = useState<FarmerTrial | null>(null);
   const [displayedKind, setDisplayedKind] = useState<'sheep' | 'wolf'>('sheep');
@@ -44,13 +43,23 @@ export default function FarmerExercise({ seed, onComplete, onCancel }: ExerciseP
   }, [endTrial]);
 
   // Neuer Trial: Stimulus wählen, Morph- und Antwortfenster-Timer starten.
+  // In einer verschachtelten Funktion statt direkt im Effect-Body (vgl.
+  // ChaseExercise.tsx) — das Setup reagiert auf einen neuen Trial (externes
+  // Ereignis, ausgelöst nach Ablauf der Flash-Anzeige), keine reine
+  // Render-Ableitung.
   useEffect(() => {
     if (state.done) return;
-    const t = generateFarmerTrial(rngRef.current, state.level);
-    trialRef.current = t;
-    respondedRef.current = false;
-    setTrial(t);
-    setDisplayedKind(t.kind === 'wolf' ? 'wolf' : 'sheep');
+
+    const setupTrial = () => {
+      // Eigene Rng-Instanz je Trial (AP3) — siehe Begründung in ChaseExercise.tsx.
+      const trial = generateFarmerTrial(createTrialRng(seed, state.totalTrials), state.level);
+      trialRef.current = trial;
+      respondedRef.current = false;
+      setTrial(trial);
+      setDisplayedKind(trial.kind === 'wolf' ? 'wolf' : 'sheep');
+      return trial;
+    };
+    const t = setupTrial();
 
     const timers: ReturnType<typeof setTimeout>[] = [];
     if (t.kind === 'morph' && t.morphDelayMs !== null) {
@@ -65,7 +74,7 @@ export default function FarmerExercise({ seed, onComplete, onCancel }: ExerciseP
     );
 
     return () => timers.forEach(clearTimeout);
-  }, [trialId, state.level, state.done]);
+  }, [trialId, state.level, state.done, state.totalTrials, seed]);
 
   const handleConfirm = useCallback(() => {
     if (respondedRef.current || !trialRef.current) return;

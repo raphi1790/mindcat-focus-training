@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRng, generateSeed } from './index';
+import { createRng, createTrialRng, generateSeed } from './index';
 
 describe('createRng', () => {
   it('liefert für gleichen Seed exakt dieselbe Sequenz (Determinismus)', () => {
@@ -70,6 +70,47 @@ describe('createRng', () => {
       expect(items).toContain(rng.pick(items));
     }
     expect(() => rng.pick([])).toThrow();
+  });
+});
+
+describe('createTrialRng', () => {
+  it('liefert für gleichen Seed und gleichen Trial-Index dieselbe Sequenz (AP3)', () => {
+    const a = createTrialRng('mindcat-v1:day1:chase', 3);
+    const b = createTrialRng('mindcat-v1:day1:chase', 3);
+    const seqA = Array.from({ length: 20 }, () => a.next());
+    const seqB = Array.from({ length: 20 }, () => b.next());
+    expect(seqA).toEqual(seqB);
+  });
+
+  it('liefert für unterschiedliche Trial-Indizes unterschiedliche Sequenzen', () => {
+    const seqs = Array.from({ length: 10 }, (_, trialIndex) =>
+      Array.from({ length: 5 }, () => createTrialRng('mindcat-v1:day1:chase', trialIndex).next()),
+    );
+    const unique = new Set(seqs.map((s) => s.join(',')));
+    expect(unique.size).toBe(seqs.length);
+  });
+
+  it('ist unabhängig davon, wie viele Züge frühere Trials verbraucht haben', () => {
+    // Trial 2 liefert dieselbe Sequenz, egal ob Trial 0/1 zuvor 0 oder 50 Züge
+    // aus ihrer jeweils eigenen Instanz gezogen haben (kein gemeinsamer Strom).
+    const untouched = createTrialRng('mindcat-v1:day1:chase', 2);
+    const untouchedSeq = Array.from({ length: 5 }, () => untouched.next());
+
+    const trial0 = createTrialRng('mindcat-v1:day1:chase', 0);
+    for (let i = 0; i < 50; i++) trial0.next();
+    const trial1 = createTrialRng('mindcat-v1:day1:chase', 1);
+    for (let i = 0; i < 50; i++) trial1.next();
+    const trial2 = createTrialRng('mindcat-v1:day1:chase', 2);
+    const trial2Seq = Array.from({ length: 5 }, () => trial2.next());
+
+    expect(trial2Seq).toEqual(untouchedSeq);
+  });
+
+  it('Seed-Ableitung ist stabil (Snapshot erste 5 Trials, mindcat-v1:day1:chase)', () => {
+    const firstDraws = Array.from({ length: 5 }, (_, trialIndex) =>
+      createTrialRng('mindcat-v1:day1:chase', trialIndex).next(),
+    );
+    expect(firstDraws).toMatchSnapshot();
   });
 });
 

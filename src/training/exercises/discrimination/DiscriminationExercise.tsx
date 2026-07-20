@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useArraySelectInput } from '../../../platform/input';
-import { createRng, type Rng } from '../../../platform/rng';
+import { createTrialRng } from '../../../platform/rng';
 import { useSelectionSound } from '../../../ui';
 import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
@@ -52,7 +52,6 @@ export default function DiscriminationExercise({
 }: DiscriminationExerciseProps) {
   const exerciseId = hasDelay ? 'discrimination-delay' : 'discrimination';
   const { state, recordTrial } = useExerciseEngine(exerciseId, CONFIG, onComplete);
-  const rngRef = useRef<Rng>(createRng(seed));
   const [trialId, setTrialId] = useState(0);
   const [trial, setTrial] = useState<DiscriminationTrial | null>(null);
   const [phase, setPhase] = useState<Phase>('study');
@@ -60,13 +59,23 @@ export default function DiscriminationExercise({
   const gateRef = useRef(createTrialGate());
 
   // Neuer Trial: Vorlage/Kandidaten erzeugen, Studier-/Delay-Phase starten.
+  // In einer verschachtelten Funktion statt direkt im Effect-Body (vgl.
+  // ChaseExercise.tsx) — das Setup reagiert auf einen neuen Trial (externes
+  // Ereignis, ausgelöst nach Ablauf der Flash-Anzeige), keine reine
+  // Render-Ableitung.
   useEffect(() => {
     if (state.done) return;
-    gateRef.current.reset();
-    const difficulty = DIFFICULTY_BY_LEVEL[Math.min(state.level, 7)] ?? DIFFICULTY_BY_LEVEL[7]!;
-    const generated = generateDiscriminationTrial(rngRef.current, difficulty.diffAttrCount, difficulty.candidateCount);
-    setTrial(generated);
-    setPhase('study');
+
+    const setupTrial = () => {
+      gateRef.current.reset();
+      const difficulty = DIFFICULTY_BY_LEVEL[Math.min(state.level, 7)] ?? DIFFICULTY_BY_LEVEL[7]!;
+      // Eigene Rng-Instanz je Trial (AP3) — siehe Begründung in ChaseExercise.tsx.
+      const trialRng = createTrialRng(seed, state.totalTrials);
+      const generated = generateDiscriminationTrial(trialRng, difficulty.diffAttrCount, difficulty.candidateCount);
+      setTrial(generated);
+      setPhase('study');
+    };
+    setupTrial();
 
     const timeouts: ReturnType<typeof setTimeout>[] = [];
     timeouts.push(
@@ -81,7 +90,7 @@ export default function DiscriminationExercise({
     );
 
     return () => timeouts.forEach(clearTimeout);
-  }, [trialId, state.level, state.done, hasDelay]);
+  }, [trialId, state.level, state.done, state.totalTrials, hasDelay, seed]);
 
   const handleSelect = useCallback(
     (index: number) => {
