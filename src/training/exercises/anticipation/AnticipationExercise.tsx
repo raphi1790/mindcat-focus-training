@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDirectionalInput } from '../../../platform/input';
 import { createRng, type Rng } from '../../../platform/rng';
-import { useExerciseEngine, type LevelConfig } from '../../engine';
+import { useExerciseEngine } from '../../engine';
+import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
 
@@ -14,7 +15,7 @@ import type { ExerciseProps } from '../../types';
  * (durchgehend sichtbare Annäherung vs. verdeckt) — die Erfolgsbedingung
  * (richtige Spur beim Auftauchen) ist in beiden Varianten identisch.
  */
-const CONFIG: LevelConfig = { levels: 7, minTrials: 21, advanceStreak: 3 };
+const CONFIG = EXERCISE_CONFIGS['anticipation-visible']; // identisch für beide Varianten
 const LANES = 5;
 const HOME_LANE = 2;
 const TICK_MS = 100;
@@ -158,21 +159,29 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
       tileAt={(x) => (phase === 'catchable' && x === targetLane ? 'target' : 'path')}
       catPos={{ x: lane, y: 0 }}
       flash={flash}
-      title={`Level ${state.level}`}
-      subtitle={`(${state.streak}/${CONFIG.advanceStreak} für Aufstieg)`}
-      counter={`Durchläufe: ${state.totalTrials} / ${CONFIG.minTrials}`}
+      level={state.level}
+      streak={{ current: state.streak, target: CONFIG.advanceStreak }}
+      counter={`${state.totalTrials} / ${CONFIG.minTrials}`}
       aboveGrid={
         <div className="mt-16 w-[90vw] max-w-[600px] grid gap-2" style={{ gridTemplateColumns: `repeat(${LANES}, 1fr)` }}>
-          {Array.from({ length: LANES }, (_, i) => (
-            <div
-              key={i}
-              className="aspect-[3/1] rounded-lg flex items-center justify-center text-3xl bg-sky-100 border border-sky-200"
-            >
-              {((visible && phase === 'approaching' && markerLane === i) ||
-                (phase === 'catchable' && targetLane === i)) &&
-                '🦆'}
-            </div>
-          ))}
+          {Array.from({ length: LANES }, (_, i) => {
+            const duckApproaching = visible && phase === 'approaching' && markerLane === i;
+            const duckSurfaced = phase === 'catchable' && targetLane === i;
+            return (
+              <div
+                key={i}
+                className="aspect-[3/1] rounded-xl flex items-center justify-center text-3xl bg-gradient-to-b from-sky-200 to-sky-300 border border-sky-300/60 shadow-inner"
+              >
+                {duckApproaching && <span className="animate-float-slow">🦆</span>}
+                {duckSurfaced && <span className="animate-pop">🦆</span>}
+                {!duckApproaching && !duckSurfaced && (
+                  <span aria-hidden className="text-xl opacity-40">
+                    🌊
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       }
       instructions={

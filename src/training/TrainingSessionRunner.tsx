@@ -1,9 +1,12 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { addTrainingSession } from '../data/firestore';
 import type { AgeGroup, ExerciseId, ExerciseResult, TrainingSessionInput } from '../data/schema';
 import { generateSeed } from '../platform/rng';
+import { Confetti, soundManager } from '../ui';
 import { EXERCISE_COMPONENTS } from './exercises';
-import { EXERCISE_LABELS } from './labels';
+import { EXERCISE_ICONS, EXERCISE_LABELS } from './labels';
+import RewardScreen from './RewardScreen';
+import { starsForResult } from './rewards';
 
 /**
  * Orchestriert einen Trainingstag (Vorbild: `AssessmentRunner`): führt die
@@ -12,6 +15,11 @@ import { EXERCISE_LABELS } from './labels';
  * Dokument. Speichern ist atomar (ein addDoc); schlägt es fehl, bleiben die
  * Ergebnisse im Speicher und können per Retry erneut geschrieben werden.
  * Abbruch während einer Übung (`HoldToExit`) verwirft die gesamte Sitzung.
+ *
+ * Phase 5 (Plan §6.3): Zwischen den Übungen liegt eine Belohnungsschleife
+ * (`RewardScreen` mit Sternen), der Tagesabschluss feiert mit Konfetti und
+ * Fanfare. Beides ist rein kosmetische Meta-Ebene — die gespeicherten Daten
+ * bleiben unverändert schema-konform.
  */
 
 interface TrainingSessionRunnerProps {
@@ -26,6 +34,7 @@ interface TrainingSessionRunnerProps {
 
 type RunnerState =
   | { step: 'running'; index: number; results: ExerciseResult[] }
+  | { step: 'reward'; index: number; results: ExerciseResult[] }
   | { step: 'saving'; results: ExerciseResult[] }
   | { step: 'saveError'; results: ExerciseResult[]; message: string }
   | { step: 'done'; results: ExerciseResult[] };
@@ -71,6 +80,20 @@ export default function TrainingSessionRunner({
     [uid, childId, sessionDay, ageGroup, sessionSeed],
   );
 
+  // Vom Belohnungsschirm weiter — idempotent (Auto-Timer, Button und
+  // Arcade-Confirm können sich überschneiden; nur der erste zählt).
+  const continueAfterReward = useCallback(() => {
+    setState((prev) => {
+      if (prev.step !== 'reward') return prev;
+      if (prev.index + 1 < exerciseIds.length) {
+        return { step: 'running', index: prev.index + 1, results: prev.results };
+      }
+      // Speichern außerhalb des Updaters anstoßen.
+      queueMicrotask(() => void save(prev.results));
+      return { step: 'saving', results: prev.results };
+    });
+  }, [exerciseIds.length, save]);
+
   if (exerciseIds.length === 0) {
     // Sollte der Scheduler nie liefern, schützt aber vor einem leeren Tag.
     return null;
@@ -86,13 +109,21 @@ export default function TrainingSessionRunner({
         seed={deriveExerciseSeed(sessionSeed, exerciseId)}
         onCancel={onCancel}
         onComplete={(result) => {
-          const nextResults = [...results, result];
-          if (index + 1 < exerciseIds.length) {
-            setState({ step: 'running', index: index + 1, results: nextResults });
-          } else {
-            void save(nextResults);
-          }
+          setState({ step: 'reward', index, results: [...results, result] });
         }}
+      />
+    );
+  }
+
+  if (state.step === 'reward') {
+    const finished = state.results[state.results.length - 1]!;
+    return (
+      <RewardScreen
+        exerciseId={finished.exerciseId}
+        stars={starsForResult(finished)}
+        dayExerciseIds={exerciseIds}
+        completedCount={state.index + 1}
+        onContinue={continueAfterReward}
       />
     );
   }
@@ -126,20 +157,54 @@ export default function TrainingSessionRunner({
     );
   }
 
+  return <SessionCelebration sessionDay={sessionDay} results={state.results} onFinished={onFinished} />;
+}
+
+/** Tagesabschluss-Feier: Konfetti, Fanfare, Sterne-Bilanz (Plan §6.3). */
+function SessionCelebration({
+  sessionDay,
+  results,
+  onFinished,
+}: {
+  sessionDay: number;
+  results: ExerciseResult[];
+  onFinished: () => void;
+}) {
+  useEffect(() => {
+    soundManager.play('fanfare');
+  }, []);
+
+  const totalStars = results.reduce((sum, r) => sum + starsForResult(r), 0);
+
   return (
     <ScreenFrame wide>
-      <div className="text-6xl mb-6">🏆</div>
-      <h2 className="text-4xl font-bold text-slate-800 mb-2">Trainingstag {sessionDay} geschafft!</h2>
-      <p className="text-xl text-slate-600 mb-8">
-        {state.results.length} {state.results.length === 1 ? 'Übung' : 'Übungen'} abgeschlossen — super gemacht!
+      <Confetti />
+      <div className="text-7xl mb-4 animate-pop">🏆</div>
+      <h2 className="text-4xl font-extrabold text-slate-800 mb-2">
+        Trainingstag {sessionDay} geschafft!
+      </h2>
+      <p className="text-xl text-slate-600 mb-2">
+        {results.length} {results.length === 1 ? 'Übung' : 'Übungen'} abgeschlossen — super gemacht!
+      </p>
+      <p className="text-2xl mb-8" aria-label={`${totalStars} Sterne gesammelt`}>
+        {totalStars} × ⭐ gesammelt
       </p>
 
       <div className="text-left bg-slate-50 rounded-2xl p-6 mb-6 space-y-2">
-        {state.results.map((r) => (
-          <div key={r.exerciseId} className="flex justify-between text-sm gap-4">
-            <span className="text-slate-500">{EXERCISE_LABELS[r.exerciseId]}</span>
-            <span className="font-semibold text-slate-700 shrink-0">
-              Level {r.highestLevel} · {r.trials} Durchläufe
+        {results.map((r) => (
+          <div key={r.exerciseId} className="flex justify-between items-center text-sm gap-4">
+            <span className="text-slate-500 flex items-center gap-2">
+              <span className="text-lg">{EXERCISE_ICONS[r.exerciseId]}</span>
+              {EXERCISE_LABELS[r.exerciseId]}
+            </span>
+            <span className="font-semibold text-slate-700 shrink-0 flex items-center gap-3">
+              <span>
+                Level {r.highestLevel} · {r.trials} Durchläufe
+              </span>
+              <span aria-label={`${starsForResult(r)} von 3 Sternen`}>
+                {'⭐'.repeat(starsForResult(r))}
+                <span className="opacity-25 grayscale">{'⭐'.repeat(3 - starsForResult(r))}</span>
+              </span>
             </span>
           </div>
         ))}

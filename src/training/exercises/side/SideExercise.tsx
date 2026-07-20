@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useDirectionalInput } from '../../../platform/input';
-import { useExerciseEngine, type LevelConfig } from '../../engine';
+import { useExerciseEngine } from '../../engine';
+import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld, { type GridTileKind } from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
 import { GRID_SIZE, LEVEL_MAPS, getStartPosition } from './maps';
 
 /** Side (Plan §6.2, Übung 1): motorische Kontrolle. a=7, b=21, c=3. */
-const CONFIG: LevelConfig = { levels: 7, minTrials: 21, advanceStreak: 3 };
+const CONFIG = EXERCISE_CONFIGS.side;
 
 const FLASH_MS = 500;
 
@@ -72,14 +73,15 @@ export default function SideExercise({ onComplete, onCancel }: ExerciseProps) {
       cols={GRID_SIZE}
       rows={GRID_SIZE}
       tileAt={(x, y) => tileKind(map[y]?.[x] ?? 0)}
+      tileEmoji={(x, y) => (tileKind(map[y]?.[x] ?? 0) === 'target' ? '🌿' : null)}
       catPos={catPos}
       flash={flash}
-      title={`Level ${state.level}`}
-      subtitle={`(${state.streak}/${CONFIG.advanceStreak} für Aufstieg)`}
-      counter={`Durchläufe: ${state.totalTrials} / ${CONFIG.minTrials}`}
+      level={state.level}
+      streak={{ current: state.streak, target: CONFIG.advanceStreak }}
+      counter={`${state.totalTrials} / ${CONFIG.minTrials}`}
       instructions={
         <>
-          Bewege die Katze (🐱) mit Joystick oder Pfeiltasten zum Gras (🟩).
+          Bewege die Katze (🐱) mit Joystick oder Pfeiltasten zum Gras (🌿).
           <br />
           <span className="text-red-500 font-bold">Vermeide den Schlamm!</span>
         </>

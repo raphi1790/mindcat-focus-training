@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import HoldToExit from '../../components/HoldToExit';
+import HoldToExit from '../../ui/HoldToExit';
 import { useChoiceInput, useConfirmInput, type ChoiceEvent } from '../../platform/input';
 import { createRng } from '../../platform/rng';
 import { deadlineAfter, isAbort, nextPaint, now, waitMs } from '../../platform/timing';

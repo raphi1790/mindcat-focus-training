@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import HoldToExit from '../../../components/HoldToExit';
 import { useArraySelectInput } from '../../../platform/input';
 import { createRng, type Rng } from '../../../platform/rng';
-import { useExerciseEngine, type LevelConfig } from '../../engine';
+import { useSelectionSound } from '../../../ui';
+import { useExerciseEngine } from '../../engine';
+import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
+import ExerciseScreen from '../../shared/ExerciseScreen';
 import Portrait from '../../shared/Portrait';
 import { generateDiscriminationTrial, type DiscriminationTrial } from '../../shared/portraits';
 import type { ExerciseProps } from '../../types';
@@ -13,7 +15,7 @@ import type { ExerciseProps } from '../../types';
  * Kandidaten-Portraits das exakt passende wählen. `hasDelay` steuert nur, ob
  * die Vorlage vor der Auswahl kurz verschwindet (Delay-Variante).
  */
-const CONFIG: LevelConfig = { levels: 7, minTrials: 21, advanceStreak: 3 };
+const CONFIG = EXERCISE_CONFIGS.discrimination; // identisch für beide Varianten
 const STUDY_MS = 1500;
 const FLASH_MS = 700;
 
@@ -93,6 +95,7 @@ export default function DiscriminationExercise({
     enabled: phase === 'choose' && flash === null && !state.done,
     resetKey: trialId,
   });
+  useSelectionSound(selectedIndex, trialId);
 
   useEffect(() => {
     if (flash === null) return;
@@ -104,26 +107,22 @@ export default function DiscriminationExercise({
   }, [flash]);
 
   return (
-    <div className="fixed inset-0 z-40 bg-sky-50 flex flex-col items-center justify-center p-8 overflow-hidden">
-      <HoldToExit onExit={onCancel} />
-
-      <div className="absolute top-8 left-8 text-2xl font-bold text-slate-600 bg-white px-4 py-2 rounded-xl shadow-sm">
-        Level {state.level}
-        <span className="text-sm font-normal text-slate-400 ml-2">
-          ({state.streak}/{CONFIG.advanceStreak} für Aufstieg)
-        </span>
-      </div>
-      <div className="absolute top-8 right-24 text-xl font-medium text-slate-500 bg-white px-4 py-2 rounded-xl shadow-sm">
-        Durchläufe: {state.totalTrials} / {CONFIG.minTrials}
-      </div>
-
-      <h2 className="text-2xl font-bold text-slate-700 mb-6 text-center max-w-lg">
-        {phase === 'choose' ? 'Welches Kätzchen passt genau?' : 'Schau dir das Kätzchen gut an!'}
-      </h2>
-
+    <ExerciseScreen
+      level={state.level}
+      streak={{ current: state.streak, target: CONFIG.advanceStreak }}
+      counter={`${state.totalTrials} / ${CONFIG.minTrials}`}
+      heading={phase === 'choose' ? 'Welches Kätzchen passt genau?' : 'Schau dir das Kätzchen gut an!'}
+      instructions="Bewege die Auswahl mit Joystick/Pfeiltasten, bestätige mit Arcade-Button/Enter."
+      flash={flash}
+      onExit={onCancel}
+    >
       <div className="mb-10 flex items-center justify-center" style={{ minHeight: 140 }}>
-        {phase !== 'delay' && trial && <Portrait attrs={trial.template} size={130} />}
-        {phase === 'delay' && <div className="text-7xl">❓</div>}
+        {phase !== 'delay' && trial && (
+          <div className={phase === 'study' ? 'animate-pop' : undefined}>
+            <Portrait attrs={trial.template} size={130} />
+          </div>
+        )}
+        {phase === 'delay' && <div className="text-7xl animate-pulse-soft">❓</div>}
       </div>
 
       {phase === 'choose' && trial && (
@@ -132,23 +131,29 @@ export default function DiscriminationExercise({
             const isSelected = i === selectedIndex;
             const isCorrect = i === trial.correctIndex;
             let ring = 'ring-2 ring-slate-200';
-            if (isSelected && flash === 'success') ring = 'ring-4 ring-green-500';
-            else if (isSelected && flash === 'error') ring = 'ring-4 ring-red-500';
-            else if (flash === 'error' && isCorrect) ring = 'ring-4 ring-green-500';
-            else if (flash === null && isSelected) ring = 'ring-4 ring-purple-500';
+            let extra = '';
+            if (isSelected && flash === 'success') {
+              ring = 'ring-4 ring-green-500';
+              extra = 'animate-pop';
+            } else if (isSelected && flash === 'error') {
+              ring = 'ring-4 ring-red-500';
+              extra = 'animate-shake';
+            } else if (flash === 'error' && isCorrect) {
+              ring = 'ring-4 ring-green-500';
+              extra = 'animate-pulse-soft';
+            } else if (flash === null && isSelected) {
+              ring = 'ring-4 ring-purple-500';
+              extra = 'scale-110';
+            }
 
             return (
-              <div key={i} className={`p-2 rounded-2xl bg-white transition-all ${ring}`}>
+              <div key={i} className={`p-2 rounded-2xl bg-white transition-all duration-150 ${ring} ${extra}`}>
                 <Portrait attrs={attrs} size={90} />
               </div>
             );
           })}
         </div>
       )}
-
-      <div className="mt-10 text-slate-500 text-lg text-center max-w-lg">
-        Bewege die Auswahl mit Joystick/Pfeiltasten, bestätige mit Arcade-Button/Enter.
-      </div>
-    </div>
+    </ExerciseScreen>
   );
 }

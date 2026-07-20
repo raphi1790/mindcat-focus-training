@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDirectionalInput } from '../../../platform/input';
 import { createRng, type Rng } from '../../../platform/rng';
-import { useExerciseEngine, type LevelConfig } from '../../engine';
+import { useExerciseEngine } from '../../engine';
+import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
 
@@ -11,7 +12,7 @@ import type { ExerciseProps } from '../../types';
  * muss ihn innerhalb eines Pro-Trial-Zeitfensters erreichen. Level ↑ = kürzeres
  * Zeitfenster und schnellere Schirm-Schritte (Gittergröße bleibt konstant).
  */
-const CONFIG: LevelConfig = { levels: 7, minTrials: 21, advanceStreak: 3 };
+const CONFIG = EXERCISE_CONFIGS.chase;
 const GRID_SIZE = 8;
 const FLASH_MS = 500;
 const TICK_MS = 100;
@@ -160,10 +161,11 @@ export default function ChaseExercise({ seed, onComplete, onCancel }: ExercisePr
       cols={GRID_SIZE}
       rows={GRID_SIZE}
       tileAt={(x, y) => (x === targetPos.x && y === targetPos.y ? 'target' : 'path')}
+      tileEmoji={(x, y) => (x === targetPos.x && y === targetPos.y ? '🌂' : null)}
       catPos={catPos}
       flash={flash}
-      title={`Level ${state.level}`}
-      subtitle={`(${state.streak}/${CONFIG.advanceStreak} für Aufstieg)`}
+      level={state.level}
+      streak={{ current: state.streak, target: CONFIG.advanceStreak }}
       counter={`Zeit: ${(remainingMs / 1000).toFixed(1)}s`}
       catEmoji="🐱"
       instructions={

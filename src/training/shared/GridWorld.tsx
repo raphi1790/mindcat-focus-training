@@ -1,11 +1,19 @@
-import type { ReactNode } from 'react';
-import HoldToExit from '../../components/HoldToExit';
+import { useEffect, useRef, type ReactNode } from 'react';
+import {
+  ExerciseHud,
+  LevelUpOverlay,
+  ParticleBurst,
+  TrainingBackdrop,
+  soundManager,
+  useGameFeel,
+} from '../../ui';
 
 /**
  * Gemeinsames Gitter-Rendering für alle Navigations-Übungen (Side, Chase,
- * Maze, Anticipation): Katze, Gitter-Tiles, Erfolgs-/Fehler-Flash, HUD und
- * `HoldToExit`. Löst die bisherige Duplikation zwischen `TrainingGrid.jsx`
- * und `MazeExercise.jsx` auf.
+ * Maze, Anticipation) — seit Phase 5 mit Game-Feel (Plan §6.3): weiche
+ * Katzen-Bewegung (Transition statt Zellen-Sprung), Welt-Backdrop,
+ * Erfolgs-Partikel, Fehler-Shake, Lob-Popup, Schritt-Sounds, Level-Up-Feier
+ * und einheitlichem HUD (Level, Streak-Sterne, Zähler, Mute, HoldToExit).
  *
  * Die Gittergröße ist je Übung konstant (Schwierigkeit steuern die Übungen
  * selbst über Tile-Layout/Timing, nicht über wachsende Gitter) — daher genügt
@@ -18,82 +26,141 @@ export interface GridWorldProps {
   cols: number;
   rows: number;
   tileAt: (x: number, y: number) => GridTileKind;
+  /** Optionales Emoji-Decal auf einem Tile (z. B. 🌂 bei Chase, 🌿 auf Gras). */
+  tileEmoji?: (x: number, y: number) => string | null;
   catPos: { x: number; y: number };
   flash: 'success' | 'error' | null;
-  title: string;
-  subtitle?: string;
+  level: number;
+  /** Streak-Sterne im HUD; bei target ≤ 1 (Maze) entfällt die Anzeige. */
+  streak?: { current: number; target: number };
   counter?: string;
   instructions: ReactNode;
   onExit: () => void;
-  /** Zusätzlicher Inhalt oberhalb des Gitters (z. B. Anticipation-Anflugspur). */
+  /** Zusätzlicher Inhalt oberhalb des Gitters (z. B. Anticipation-Wasserspur). */
   aboveGrid?: ReactNode;
   catEmoji?: string;
 }
 
 const TILE_CLASS: Record<GridTileKind, string> = {
-  hazard: 'bg-[var(--color-mud)]',
-  target: 'bg-[var(--color-grass)]',
-  path: 'bg-amber-50',
+  hazard: 'bg-[radial-gradient(circle_at_30%_30%,#9c6b3c,#7a4a1f)] shadow-inner',
+  target: 'bg-[radial-gradient(circle_at_35%_35%,#66ce6a,#3f9e44)] animate-pulse-soft',
+  path: 'bg-amber-50/90',
 };
+
+const PRAISES = ['Super!', 'Toll!', 'Klasse!', 'Spitze!', 'Juhu!'];
 
 export default function GridWorld({
   cols,
   rows,
   tileAt,
+  tileEmoji,
   catPos,
   flash,
-  title,
-  subtitle,
+  level,
+  streak,
   counter,
   instructions,
   onExit,
   aboveGrid,
   catEmoji = '🐱',
 }: GridWorldProps) {
+  const { levelUp } = useGameFeel(level, flash);
+
+  // Schritt-Sound bei echten Einzelschritten (Sprünge = Trial-Reset → still).
+  const prevPos = useRef(catPos);
+  useEffect(() => {
+    const stepDistance = Math.max(
+      Math.abs(catPos.x - prevPos.current.x),
+      Math.abs(catPos.y - prevPos.current.y),
+    );
+    prevPos.current = catPos;
+    if (stepDistance === 1 && flash === null) soundManager.play('step');
+  }, [catPos, flash]);
+
+  // Lob-Wort pur aus Position/Level abgeleitet (renderstabil während des
+  // Flashs — Katze und Level ändern sich erst beim Trial-Reset danach).
+  const praise = PRAISES[(catPos.x * 7 + catPos.y * 13 + level * 3) % PRAISES.length];
+
   const cells = [];
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
-      const isCat = catPos.x === x && catPos.y === y;
+      const decal = tileEmoji?.(x, y) ?? null;
       cells.push(
         <div
           key={`${x}-${y}`}
           className={`w-full h-full border border-slate-200/20 flex items-center justify-center text-2xl sm:text-3xl transition-all duration-200 ${TILE_CLASS[tileAt(x, y)]}`}
         >
-          {isCat && <span className="animate-bounce">{catEmoji}</span>}
+          {decal && <span className="animate-pop">{decal}</span>}
         </div>,
       );
     }
   }
 
+  const tileW = 100 / cols;
+  const tileH = 100 / rows;
+  const displayCat = flash === 'success' ? '😸' : flash === 'error' ? '🙀' : catEmoji;
+
   return (
-    <div
-      className={`flex flex-col items-center justify-center flex-1 w-full h-screen fixed inset-0 z-40 transition-colors duration-300 ${
-        flash === 'error' ? 'bg-red-200' : flash === 'success' ? 'bg-green-200' : 'bg-slate-100'
-      }`}
-    >
-      <HoldToExit onExit={onExit} />
-
-      <div className="absolute top-8 left-8 text-2xl font-bold text-slate-600 bg-white px-4 py-2 rounded-xl shadow-sm">
-        {title}
-        {subtitle && <span className="text-sm font-normal text-slate-400 ml-2">{subtitle}</span>}
-      </div>
-
-      {counter && (
-        <div className="absolute top-8 right-24 text-xl font-medium text-slate-500 bg-white px-4 py-2 rounded-xl shadow-sm">
-          {counter}
-        </div>
-      )}
+    <TrainingBackdrop flash={flash}>
+      <ExerciseHud level={level} streak={streak} counter={counter} onExit={onExit} />
+      <LevelUpOverlay level={level} visible={levelUp} />
 
       {aboveGrid}
 
       <div
-        className="mt-16 w-[90vw] max-w-[600px] aspect-square grid shadow-2xl rounded-2xl overflow-hidden border-4 border-white"
-        style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}
+        className={`relative mt-16 w-[90vw] max-w-[600px] aspect-square shadow-2xl rounded-2xl overflow-hidden border-4 transition-colors ${
+          flash === 'error' ? 'animate-shake border-rose-300' : 'border-white'
+        }`}
       >
-        {cells}
+        <div
+          className="grid w-full h-full"
+          style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}
+        >
+          {cells}
+        </div>
+
+        {/* Katzen-Ebene: gleitet weich zwischen Tiles (Arcade-Feel). */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div
+            className="absolute flex items-center justify-center text-2xl sm:text-4xl transition-all duration-150 ease-out"
+            style={{
+              width: `${tileW}%`,
+              height: `${tileH}%`,
+              left: `${catPos.x * tileW}%`,
+              top: `${catPos.y * tileH}%`,
+            }}
+          >
+            <span
+              className={
+                flash === 'success'
+                  ? 'animate-pop'
+                  : flash === 'error'
+                    ? 'animate-dizzy'
+                    : 'animate-cat-hop'
+              }
+            >
+              {displayCat}
+            </span>
+            {flash === 'success' && <ParticleBurst className="absolute inset-0" />}
+          </div>
+        </div>
+
+        {/* Lob-Popup über der Katze */}
+        {flash === 'success' && (
+          <div
+            className="absolute pointer-events-none flex justify-center animate-rise-fade"
+            style={{ width: `${tileW * 3}%`, left: `${(catPos.x - 1) * tileW}%`, top: `${catPos.y * tileH}%` }}
+          >
+            <span className="text-2xl sm:text-3xl font-extrabold text-emerald-600 drop-shadow-sm whitespace-nowrap">
+              {praise}
+            </span>
+          </div>
+        )}
       </div>
 
-      <div className="mt-8 text-center text-slate-500 text-xl font-medium max-w-lg">{instructions}</div>
-    </div>
+      <div className="mt-8 text-center text-slate-600 text-xl font-medium max-w-lg bg-white/70 backdrop-blur-sm rounded-2xl px-6 py-3 shadow-sm">
+        {instructions}
+      </div>
+    </TrainingBackdrop>
   );
 }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import HoldToExit from '../../../components/HoldToExit';
 import { useChoiceInput, type ChoiceEvent } from '../../../platform/input';
 import { createRng, type Rng } from '../../../platform/rng';
-import { useExerciseEngine, type LevelConfig } from '../../engine';
+import { useExerciseEngine } from '../../engine';
+import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
+import ExerciseScreen from '../../shared/ExerciseScreen';
 import type { ExerciseProps } from '../../types';
 import { generateStroopTrial, type StroopSide, type StroopTrial } from './generator';
 
@@ -11,14 +12,26 @@ import { generateStroopTrial, type StroopSide, type StroopTrial } from './genera
  * nur inkongruente Trials zum Advance-Streak zählen (kongruente/neutrale
  * Trials bewegen ihn weder vorwärts noch setzen sie ihn zurück).
  */
-const CONFIG: LevelConfig = { levels: 6, minTrials: 18, advanceStreak: 3 };
+const CONFIG = EXERCISE_CONFIGS['number-stroop'];
 const FLASH_MS = 500;
 
-function Cluster({ side, flashColor }: { side: StroopSide; flashColor: string }) {
+function Cluster({
+  side,
+  flashState,
+}: {
+  side: StroopSide;
+  flashState: 'success' | 'error' | null;
+}) {
   const items = Array.from({ length: side.count });
+  const color =
+    flashState === 'success'
+      ? 'bg-green-100 border-green-400 animate-pop'
+      : flashState === 'error'
+        ? 'bg-red-100 border-red-400 animate-shake'
+        : 'bg-white border-slate-200';
   return (
     <div
-      className={`flex flex-wrap gap-1 items-center justify-center w-40 h-40 rounded-2xl border-4 p-3 transition-colors ${flashColor}`}
+      className={`flex flex-wrap gap-1 items-center justify-center w-40 h-40 rounded-2xl border-4 p-3 shadow-sm transition-colors ${color}`}
     >
       {items.map((_, i) =>
         side.symbol === null ? (
@@ -54,7 +67,10 @@ export default function NumberStroopExercise({ seed, onComplete, onCancel }: Exe
       setFlash({ side: choice, kind: correct ? 'success' : 'error' });
       recordTrial({
         result: correct ? 'correct' : 'error',
-        countsTowardStreak: trial.type === 'incongruent',
+        // Apfel-Level (neutral) haben keine inkongruenten Trials — dort zählt
+        // jeder korrekte Trial. Ab den Ziffern-Leveln zählen nur inkongruente
+        // Trials zum c=3-Kriterium; kongruente bewegen den Streak nicht.
+        countsTowardStreak: trial.type !== 'congruent',
       });
     },
     [trial, flash, recordTrial],
@@ -71,40 +87,29 @@ export default function NumberStroopExercise({ seed, onComplete, onCancel }: Exe
     return () => clearTimeout(timeout);
   }, [flash]);
 
-  const colorFor = (side: 'L' | 'R') => {
-    if (flash && flash.side === side) return flash.kind === 'success' ? 'bg-green-100 border-green-400' : 'bg-red-100 border-red-400';
-    return 'bg-white border-slate-200';
-  };
+  const flashFor = (side: 'L' | 'R') => (flash && flash.side === side ? flash.kind : null);
 
   return (
-    <div className="fixed inset-0 z-40 bg-sky-50 flex flex-col items-center justify-center p-8 overflow-hidden">
-      <HoldToExit onExit={onCancel} />
-
-      <div className="absolute top-8 left-8 text-2xl font-bold text-slate-600 bg-white px-4 py-2 rounded-xl shadow-sm">
-        Level {state.level}
-        <span className="text-sm font-normal text-slate-400 ml-2">
-          ({state.streak}/{CONFIG.advanceStreak} für Aufstieg)
-        </span>
-      </div>
-      <div className="absolute top-8 right-24 text-xl font-medium text-slate-500 bg-white px-4 py-2 rounded-xl shadow-sm">
-        Durchläufe: {state.totalTrials} / {CONFIG.minTrials}
-      </div>
-
-      <h2 className="text-2xl font-bold text-slate-700 mb-10 text-center max-w-lg">
-        Welche Seite hat mehr?
-      </h2>
-
+    <ExerciseScreen
+      level={state.level}
+      streak={{ current: state.streak, target: CONFIG.advanceStreak }}
+      counter={`${state.totalTrials} / ${CONFIG.minTrials}`}
+      heading="Welche Seite hat mehr?"
+      instructions={
+        <>
+          Drücke <strong>links</strong> oder <strong>rechts</strong> — welche Seite hat mehr?
+        </>
+      }
+      flash={flash?.kind ?? null}
+      onExit={onCancel}
+    >
       {trial && (
-        <div className="flex gap-10 items-center">
-          <Cluster side={trial.left} flashColor={colorFor('L')} />
-          <div className="text-3xl text-slate-300 font-light">vs</div>
-          <Cluster side={trial.right} flashColor={colorFor('R')} />
+        <div key={trialId} className="flex gap-10 items-center animate-pop">
+          <Cluster side={trial.left} flashState={flashFor('L')} />
+          <div className="text-3xl text-slate-400 font-light">vs</div>
+          <Cluster side={trial.right} flashState={flashFor('R')} />
         </div>
       )}
-
-      <div className="mt-10 text-slate-500 text-lg text-center max-w-lg">
-        Drücke <strong>links</strong> oder <strong>rechts</strong> — welche Seite hat mehr?
-      </div>
-    </div>
+    </ExerciseScreen>
   );
 }

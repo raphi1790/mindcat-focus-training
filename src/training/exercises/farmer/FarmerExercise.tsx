@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import HoldToExit from '../../../components/HoldToExit';
 import { useConfirmInput } from '../../../platform/input';
 import { createRng, type Rng } from '../../../platform/rng';
-import { useExerciseEngine, type LevelConfig, type TrialResultKind } from '../../engine';
+import { useExerciseEngine, type TrialResultKind } from '../../engine';
+import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
+import ExerciseScreen from '../../shared/ExerciseScreen';
 import type { ExerciseProps } from '../../types';
 import { generateFarmerTrial, type FarmerTrial } from './generator';
 
@@ -10,8 +11,13 @@ import { generateFarmerTrial, type FarmerTrial } from './generator';
  * Farmer / Go-No-Go (Plan §6.2, Übung 8, nur 6-Jährige): Inhibitionskontrolle.
  * a=7, b=66, c=6 (≥1 No-Go im Streak) — der Qualifier `satisfiesQualifier`
  * markiert korrekt zurückgehaltene No-Go-Trials.
+ *
+ * Game-Feel-Grenze: Der Wolf-Morph bleibt bewusst ohne Sound/Extra-Animation —
+ * ein auditiver oder auffälliger visueller Hinweis würde die Inhibitions-
+ * aufgabe (visuelle Diskrimination Schaf/Wolf) verfälschen. Juice gibt es nur
+ * als Feedback NACH der Antwort bzw. nach Ablauf des Antwortfensters.
  */
-const CONFIG: LevelConfig = { levels: 7, minTrials: 66, advanceStreak: 6 };
+const CONFIG = EXERCISE_CONFIGS.farmer;
 const FLASH_MS = 450;
 
 export default function FarmerExercise({ seed, onComplete, onCancel }: ExerciseProps) {
@@ -78,36 +84,37 @@ export default function FarmerExercise({ seed, onComplete, onCancel }: ExerciseP
     return () => clearTimeout(timeout);
   }, [flash]);
 
-  const bg =
-    flash === 'success' ? 'bg-green-100 border-green-400' : flash === 'error' ? 'bg-red-100 border-red-400' : 'bg-white border-slate-200';
+  const circle =
+    flash === 'success'
+      ? 'bg-green-100 border-green-400 animate-pop'
+      : flash === 'error'
+        ? 'bg-red-100 border-red-400 animate-shake'
+        : 'bg-white border-slate-200';
 
   return (
-    <div className="fixed inset-0 z-40 bg-sky-50 flex flex-col items-center justify-center p-8 overflow-hidden">
-      <HoldToExit onExit={onCancel} />
-
-      <div className="absolute top-8 left-8 text-2xl font-bold text-slate-600 bg-white px-4 py-2 rounded-xl shadow-sm">
-        Level {state.level}
-        <span className="text-sm font-normal text-slate-400 ml-2">
-          ({state.streak}/{CONFIG.advanceStreak} für Aufstieg)
-        </span>
-      </div>
-      <div className="absolute top-8 right-24 text-xl font-medium text-slate-500 bg-white px-4 py-2 rounded-xl shadow-sm">
-        Durchläufe: {state.totalTrials} / {CONFIG.minTrials}
-      </div>
-
-      <h2 className="text-2xl font-bold text-slate-700 mb-10 text-center max-w-lg">
-        Schaf → klicken! Wolf → still halten!
-      </h2>
-
-      <div className={`w-56 h-56 rounded-full border-4 flex items-center justify-center text-9xl transition-colors ${bg}`}>
+    <ExerciseScreen
+      level={state.level}
+      streak={{ current: state.streak, target: CONFIG.advanceStreak }}
+      counter={`${state.totalTrials} / ${CONFIG.minTrials}`}
+      heading="Schaf → klicken! Wolf → still halten!"
+      instructions={
+        <>
+          Schaf (🐑): Arcade-Button/Enter drücken, so schnell du kannst.
+          <br />
+          <span className="text-red-500 font-bold">
+            Wolf (🐺): NICHT drücken — auch wenn er erst später auftaucht!
+          </span>
+        </>
+      }
+      flash={flash}
+      onExit={onCancel}
+    >
+      <div
+        className={`w-56 h-56 rounded-full border-4 shadow-sm flex items-center justify-center text-9xl transition-colors ${circle}`}
+      >
+        {/* Kein Morph-Juice: Schaf und Wolf erscheinen/wechseln neutral. */}
         {trial && (displayedKind === 'sheep' ? '🐑' : '🐺')}
       </div>
-
-      <div className="mt-10 text-slate-500 text-lg text-center max-w-lg">
-        Schaf (🐑): Arcade-Button/Enter drücken, so schnell du kannst.
-        <br />
-        <span className="text-red-500 font-bold">Wolf (🐺): NICHT drücken — auch wenn er erst später auftaucht!</span>
-      </div>
-    </div>
+    </ExerciseScreen>
   );
 }

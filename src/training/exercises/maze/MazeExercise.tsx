@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useDirectionalInput } from '../../../platform/input';
-import { useExerciseEngine, type LevelConfig } from '../../engine';
+import { useExerciseEngine } from '../../engine';
+import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld, { type GridTileKind } from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
 import { GRID_SIZE, LEVEL_MAPS, getStartPosition } from './maps';
 
 /** Maze (Plan §6.2, Übung 3): Antizipation/Planung. a=6, b=6, c=1. */
-const CONFIG: LevelConfig = { levels: 6, minTrials: 6, advanceStreak: 1 };
+const CONFIG = EXERCISE_CONFIGS.maze;
 
 const FLASH_MS = 500;
 
@@ -71,14 +72,14 @@ export default function MazeExercise({ onComplete, onCancel }: ExerciseProps) {
       cols={GRID_SIZE}
       rows={GRID_SIZE}
       tileAt={(x, y) => tileKind(map[y]?.[x] ?? 0)}
+      tileEmoji={(x, y) => (tileKind(map[y]?.[x] ?? 0) === 'target' ? '🌿' : null)}
       catPos={catPos}
       flash={flash}
-      title={`Labyrinth ${state.level}`}
-      subtitle={`(${state.totalTrials}/${CONFIG.minTrials} geschafft)`}
-      counter={`Level ${state.level} / ${CONFIG.levels}`}
+      level={state.level}
+      counter={`Labyrinth ${state.totalTrials} / ${CONFIG.minTrials} geschafft`}
       instructions={
         <>
-          Navigiere durch das Labyrinth zum Gras (🟩).
+          Navigiere durch das Labyrinth zum Gras (🌿).
           <br />
           <span className="text-red-500 font-bold">
             Achtung: Joystick-Diagonale erfordert Vorsicht an den Ecken!
