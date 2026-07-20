@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDirectionalInput } from '../../../platform/input';
 import { createRng, type Rng } from '../../../platform/rng';
-import { useExerciseEngine } from '../../engine';
+import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
@@ -72,13 +72,25 @@ export default function ChaseExercise({ seed, onComplete, onCancel }: ExercisePr
   const [flash, setFlash] = useState<'success' | 'error' | null>(null);
   const [remainingMs, setRemainingMs] = useState(() => timeLimitForLevel(1));
 
+  // Quelle der Wahrheit für Bewegung/Timer außerhalb von State-Updatern
+  // (React StrictMode ruft Updater-Funktionen im Dev-Modus doppelt auf —
+  // Seiteneffekte wie `endTrial` dürfen deshalb nie darin stehen).
+  const catPosRef = useRef(catPos);
   const targetPosRef = useRef(targetPos);
   useEffect(() => {
     targetPosRef.current = targetPos;
   }, [targetPos]);
+  const remainingRef = useRef(remainingMs);
+  const gateRef = useRef(createTrialGate());
+
+  const updateCatPos = useCallback((pos: Pos) => {
+    catPosRef.current = pos;
+    setCatPos(pos);
+  }, []);
 
   const endTrial = useCallback(
     (caught: boolean) => {
+      if (!gateRef.current.tryClose()) return;
       setFlash(caught ? 'success' : 'error');
       recordTrial({ result: caught ? 'correct' : 'missed' });
     },
@@ -97,10 +109,12 @@ export default function ChaseExercise({ seed, onComplete, onCancel }: ExercisePr
     // ChildAnt.tsx' `run()`) — das Setup reagiert auf einen neuen Trial
     // (externes Ereignis), keine reine Render-Ableitung.
     const setupTrial = () => {
+      gateRef.current.reset();
       const cat = centerPos();
-      setCatPos(cat);
+      updateCatPos(cat);
       setTargetPos(randomPos(rngRef.current, cat));
-      setRemainingMs(timeLimitForLevel(state.level));
+      remainingRef.current = timeLimitForLevel(state.level);
+      setRemainingMs(remainingRef.current);
     };
     setupTrial();
 
@@ -110,39 +124,36 @@ export default function ChaseExercise({ seed, onComplete, onCancel }: ExercisePr
     }, stepMs);
 
     const tickInterval = setInterval(() => {
-      setRemainingMs((prev) => {
-        const next = prev - TICK_MS;
-        if (next <= 0) {
-          clearInterval(stepInterval);
-          clearInterval(tickInterval);
-          endTrialRef.current(false);
-          return 0;
-        }
-        return next;
-      });
+      const next = remainingRef.current - TICK_MS;
+      remainingRef.current = Math.max(0, next);
+      setRemainingMs(remainingRef.current);
+      if (next <= 0) {
+        clearInterval(stepInterval);
+        clearInterval(tickInterval);
+        endTrialRef.current(false);
+      }
     }, TICK_MS);
 
     return () => {
       clearInterval(stepInterval);
       clearInterval(tickInterval);
     };
-  }, [trialId, state.level, state.done]);
+  }, [trialId, state.level, state.done, updateCatPos]);
 
   const handleMove = useCallback(
     ({ dx, dy }: { dx: number; dy: number }) => {
       if (flash !== null) return;
-      setCatPos((prev) => {
-        const next = {
-          x: Math.min(Math.max(prev.x + dx, 0), GRID_SIZE - 1),
-          y: Math.min(Math.max(prev.y + dy, 0), GRID_SIZE - 1),
-        };
-        if (next.x === targetPosRef.current.x && next.y === targetPosRef.current.y) {
-          endTrialRef.current(true);
-        }
-        return next;
-      });
+      const prev = catPosRef.current;
+      const next = {
+        x: Math.min(Math.max(prev.x + dx, 0), GRID_SIZE - 1),
+        y: Math.min(Math.max(prev.y + dy, 0), GRID_SIZE - 1),
+      };
+      updateCatPos(next);
+      if (next.x === targetPosRef.current.x && next.y === targetPosRef.current.y) {
+        endTrialRef.current(true);
+      }
     },
-    [flash],
+    [flash, updateCatPos],
   );
 
   useDirectionalInput(handleMove, { enabled: flash === null && !state.done, repeatDelayMs: 150 });

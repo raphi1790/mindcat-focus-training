@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useArraySelectInput } from '../../../platform/input';
 import { createRng, type Rng } from '../../../platform/rng';
 import { useSelectionSound } from '../../../ui';
-import { useExerciseEngine } from '../../engine';
+import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import ExerciseScreen from '../../shared/ExerciseScreen';
 import type { ExerciseProps } from '../../types';
@@ -18,15 +18,18 @@ export default function NumberExercise({ seed, onComplete, onCancel }: ExerciseP
   const [trialId, setTrialId] = useState(0);
   const [trial, setTrial] = useState<NumberTrial | null>(null);
   const [flash, setFlash] = useState<'success' | 'error' | null>(null);
+  const gateRef = useRef(createTrialGate());
 
   useEffect(() => {
     if (state.done) return;
+    gateRef.current.reset();
     setTrial(generateNumberTrial(rngRef.current, state.level));
   }, [trialId, state.level, state.done]);
 
   const handleSelect = useCallback(
     (index: number) => {
       if (!trial || flash !== null) return;
+      if (!gateRef.current.tryClose()) return;
       const correct = index === trial.correctIndex;
       setFlash(correct ? 'success' : 'error');
       recordTrial({ result: correct ? 'correct' : 'error' });

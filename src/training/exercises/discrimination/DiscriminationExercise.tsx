@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useArraySelectInput } from '../../../platform/input';
 import { createRng, type Rng } from '../../../platform/rng';
 import { useSelectionSound } from '../../../ui';
-import { useExerciseEngine } from '../../engine';
+import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import ExerciseScreen from '../../shared/ExerciseScreen';
 import Portrait from '../../shared/Portrait';
@@ -57,10 +57,12 @@ export default function DiscriminationExercise({
   const [trial, setTrial] = useState<DiscriminationTrial | null>(null);
   const [phase, setPhase] = useState<Phase>('study');
   const [flash, setFlash] = useState<'success' | 'error' | null>(null);
+  const gateRef = useRef(createTrialGate());
 
   // Neuer Trial: Vorlage/Kandidaten erzeugen, Studier-/Delay-Phase starten.
   useEffect(() => {
     if (state.done) return;
+    gateRef.current.reset();
     const difficulty = DIFFICULTY_BY_LEVEL[Math.min(state.level, 7)] ?? DIFFICULTY_BY_LEVEL[7]!;
     const generated = generateDiscriminationTrial(rngRef.current, difficulty.diffAttrCount, difficulty.candidateCount);
     setTrial(generated);
@@ -84,6 +86,7 @@ export default function DiscriminationExercise({
   const handleSelect = useCallback(
     (index: number) => {
       if (!trial || phase !== 'choose' || flash !== null) return;
+      if (!gateRef.current.tryClose()) return;
       const correct = index === trial.correctIndex;
       setFlash(correct ? 'success' : 'error');
       recordTrial({ result: correct ? 'correct' : 'error' });

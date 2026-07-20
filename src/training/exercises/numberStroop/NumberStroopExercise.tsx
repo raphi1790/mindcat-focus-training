@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChoiceInput, type ChoiceEvent } from '../../../platform/input';
 import { createRng, type Rng } from '../../../platform/rng';
-import { useExerciseEngine } from '../../engine';
+import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import ExerciseScreen from '../../shared/ExerciseScreen';
 import type { ExerciseProps } from '../../types';
@@ -54,15 +54,18 @@ export default function NumberStroopExercise({ seed, onComplete, onCancel }: Exe
   const [trialId, setTrialId] = useState(0);
   const [trial, setTrial] = useState<StroopTrial | null>(null);
   const [flash, setFlash] = useState<{ side: 'L' | 'R'; kind: 'success' | 'error' } | null>(null);
+  const gateRef = useRef(createTrialGate());
 
   useEffect(() => {
     if (state.done) return;
+    gateRef.current.reset();
     setTrial(generateStroopTrial(rngRef.current, state.level));
   }, [trialId, state.level, state.done]);
 
   const handleChoice = useCallback(
     ({ choice }: ChoiceEvent) => {
       if (!trial || flash !== null) return;
+      if (!gateRef.current.tryClose()) return;
       const correct = choice === trial.correctSide;
       setFlash({ side: choice, kind: correct ? 'success' : 'error' });
       recordTrial({

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDirectionalInput } from '../../../platform/input';
 import { createRng, type Rng } from '../../../platform/rng';
-import { useExerciseEngine } from '../../engine';
+import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
@@ -56,18 +56,18 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
   const [elapsedMs, setElapsedMs] = useState(0);
   const [flash, setFlash] = useState<'success' | 'error' | null>(null);
 
+  // Quelle der Wahrheit außerhalb von State-Updatern (React StrictMode ruft
+  // Updater-Funktionen im Dev-Modus doppelt auf — Seiteneffekte wie
+  // `endTrial` dürfen deshalb nie darin stehen).
   const laneRef = useRef(lane);
-  useEffect(() => {
-    laneRef.current = lane;
-  }, [lane]);
   const targetLaneRef = useRef(targetLane);
-  useEffect(() => {
-    targetLaneRef.current = targetLane;
-  }, [targetLane]);
   const phaseRef = useRef<Phase>('approaching');
+  const elapsedRef = useRef(0);
+  const gateRef = useRef(createTrialGate());
 
   const endTrial = useCallback(
     (caught: boolean) => {
+      if (!gateRef.current.tryClose()) return;
       setFlash(caught ? 'success' : 'error');
       recordTrial({ result: caught ? 'correct' : 'missed' });
     },
@@ -83,11 +83,15 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
     if (state.done) return;
 
     const setupTrial = () => {
+      gateRef.current.reset();
       const target = pickTargetLane(rngRef.current, HOME_LANE);
       phaseRef.current = 'approaching';
+      laneRef.current = HOME_LANE;
       setLane(HOME_LANE);
+      targetLaneRef.current = target;
       setTargetLane(target);
       setPhase('approaching');
+      elapsedRef.current = 0;
       setElapsedMs(0);
     };
     setupTrial();
@@ -96,27 +100,24 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
     const catchWindowMs = catchWindowMsForLevel(state.level);
 
     const tick = setInterval(() => {
-      setElapsedMs((prev) => {
-        const next = prev + TICK_MS;
+      const next = elapsedRef.current + TICK_MS;
+      elapsedRef.current = next;
+      setElapsedMs(next);
 
-        if (next >= travelMs && phaseRef.current === 'approaching') {
-          phaseRef.current = 'catchable';
-          setPhase('catchable');
-          if (laneRef.current === targetLaneRef.current) {
-            clearInterval(tick);
-            endTrialRef.current(true);
-            return next;
-          }
-        }
-
-        if (next >= travelMs + catchWindowMs) {
+      if (next >= travelMs && phaseRef.current === 'approaching') {
+        phaseRef.current = 'catchable';
+        setPhase('catchable');
+        if (laneRef.current === targetLaneRef.current) {
           clearInterval(tick);
-          if (phaseRef.current === 'catchable') endTrialRef.current(false);
-          return next;
+          endTrialRef.current(true);
+          return;
         }
+      }
 
-        return next;
-      });
+      if (next >= travelMs + catchWindowMs) {
+        clearInterval(tick);
+        if (phaseRef.current === 'catchable') endTrialRef.current(false);
+      }
     }, TICK_MS);
 
     return () => clearInterval(tick);
@@ -125,13 +126,12 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
   const handleMove = useCallback(
     ({ dx }: { dx: number; dy: number }) => {
       if (flash !== null || dx === 0) return;
-      setLane((prev) => {
-        const next = Math.min(Math.max(prev + dx, 0), LANES - 1);
-        if (phaseRef.current === 'catchable' && next === targetLaneRef.current) {
-          endTrialRef.current(true);
-        }
-        return next;
-      });
+      const next = Math.min(Math.max(laneRef.current + dx, 0), LANES - 1);
+      laneRef.current = next;
+      setLane(next);
+      if (phaseRef.current === 'catchable' && next === targetLaneRef.current) {
+        endTrialRef.current(true);
+      }
     },
     [flash],
   );

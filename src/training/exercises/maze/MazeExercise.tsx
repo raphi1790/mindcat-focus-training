@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDirectionalInput } from '../../../platform/input';
-import { useExerciseEngine } from '../../engine';
+import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld, { type GridTileKind } from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
@@ -21,11 +21,13 @@ export default function MazeExercise({ onComplete, onCancel }: ExerciseProps) {
   const { state, recordTrial } = useExerciseEngine('maze', CONFIG, onComplete);
   const [catPos, setCatPos] = useState(() => getStartPosition(1));
   const [flash, setFlash] = useState<'success' | 'error' | null>(null);
+  const gateRef = useRef(createTrialGate());
 
   const map = LEVEL_MAPS[state.level] ?? LEVEL_MAPS[1]!;
 
   const handleTrialEnd = useCallback(
     (success: boolean) => {
+      if (!gateRef.current.tryClose()) return;
       setFlash(success ? 'success' : 'error');
       recordTrial({ result: success ? 'correct' : 'error' });
     },
@@ -63,6 +65,7 @@ export default function MazeExercise({ onComplete, onCancel }: ExerciseProps) {
     const timeout = setTimeout(() => {
       setFlash(null);
       setCatPos(getStartPosition(state.level));
+      gateRef.current.reset();
     }, FLASH_MS);
     return () => clearTimeout(timeout);
   }, [flash, state.level]);
