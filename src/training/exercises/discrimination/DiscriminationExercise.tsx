@@ -120,12 +120,14 @@ export default function DiscriminationExercise({
       onExit={onCancel}
     >
       <div className="mb-10 flex items-center justify-center" style={{ minHeight: 140 }}>
-        {phase !== 'delay' && trial && (
-          <div className={phase === 'study' ? 'animate-pop' : undefined}>
+        {(phase === 'study' || (phase === 'choose' && !hasDelay)) && trial && (
+          <div data-testid="discrimination-template" className={phase === 'study' ? 'animate-pop' : undefined}>
             <Portrait attrs={trial.template} size={130} />
           </div>
         )}
-        {phase === 'delay' && <div className="text-7xl animate-pulse-soft">❓</div>}
+        {(phase === 'delay' || (phase === 'choose' && hasDelay)) && (
+          <div className="text-7xl animate-pulse-soft">❓</div>
+        )}
       </div>
 
       {phase === 'choose' && trial && (
