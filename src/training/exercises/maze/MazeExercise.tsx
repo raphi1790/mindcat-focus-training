@@ -18,9 +18,11 @@ function tileKind(value: number): GridTileKind {
   return 'path';
 }
 
-export default function MazeExercise({ onComplete, onCancel }: ExerciseProps) {
+export default function MazeExercise({ onComplete, onCancel, initialState, onLevelUp }: ExerciseProps) {
   const { state, recordTrial, logEvent } = useExerciseEngine('maze', CONFIG, onComplete, {
     logRawEvents: true,
+    initialState,
+    onLevelUp,
   });
   const [catPos, setCatPos] = useState(() => getStartPosition(1));
   const [flash, setFlash] = useState<'success' | null>(null);

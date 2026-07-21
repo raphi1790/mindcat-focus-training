@@ -9,6 +9,7 @@ import { getExerciseSetForAge } from './data/exerciseSet';
 import type { NextStep } from './data/progress';
 import type { AssessmentPhase, ExerciseId } from './data/schema';
 import { buildTrainingPlan, EXERCISE_COMPONENTS, EXERCISE_ICONS, EXERCISE_LABELS, TrainingSessionRunner } from './training';
+import { ErrorBoundary } from './ui';
 
 /**
  * App-Shell: Kinder-Auswahl (Phase 1) + Assessment-Orchestrierung (Phase 2)
@@ -142,41 +143,52 @@ function DashboardShell() {
     setView('DASHBOARD');
   };
 
+  const handleErrorReset = () => {
+    // Nach einem abgefangenen Renderfehler zurück ins Dashboard. Der Fortschritt
+    // ist dank inkrementellem Speichern (AP6) sicher; Neu-Laden aktualisiert die
+    // Anzeige. Ein erneuter Start setzt am letzten Checkpoint fort.
+    setStandaloneExercise(null);
+    refreshProgress();
+    setView('DASHBOARD');
+  };
+
   if (view !== 'DASHBOARD') {
     const StandaloneComponent = standaloneExercise ? EXERCISE_COMPONENTS[standaloneExercise.id] : null;
     const dayExercises = trainingPlan[(childProgress?.nextSessionDay ?? 1) - 1] ?? [];
 
     return (
       <div className="fixed inset-0 bg-white z-50 overflow-hidden">
-        {view === 'ASSESSMENT' && (
-          <AssessmentRunner
-            uid={uid}
-            childId={activeChild.id}
-            ageGroup={activeChild.ageGroup}
-            phase={assessmentPhase}
-            onFinished={handleAssessmentFinished}
-            onCancel={handleSessionCancel}
-          />
-        )}
-        {view === 'TRAINING_SESSION' && (
-          <TrainingSessionRunner
-            uid={uid}
-            childId={activeChild.id}
-            ageGroup={activeChild.ageGroup}
-            sessionDay={childProgress?.nextSessionDay ?? 1}
-            exerciseIds={dayExercises}
-            onFinished={handleTrainingSessionFinished}
-            onCancel={handleSessionCancel}
-          />
-        )}
-        {view === 'STANDALONE_EXERCISE' && standaloneExercise && StandaloneComponent && (
-          <StandaloneComponent
-            ageGroup={activeChild.ageGroup}
-            seed={standaloneExercise.seed}
-            onComplete={handleStandaloneExerciseComplete}
-            onCancel={handleSessionCancel}
-          />
-        )}
+        <ErrorBoundary onReset={handleErrorReset}>
+          {view === 'ASSESSMENT' && (
+            <AssessmentRunner
+              uid={uid}
+              childId={activeChild.id}
+              ageGroup={activeChild.ageGroup}
+              phase={assessmentPhase}
+              onFinished={handleAssessmentFinished}
+              onCancel={handleSessionCancel}
+            />
+          )}
+          {view === 'TRAINING_SESSION' && (
+            <TrainingSessionRunner
+              uid={uid}
+              childId={activeChild.id}
+              ageGroup={activeChild.ageGroup}
+              sessionDay={childProgress?.nextSessionDay ?? 1}
+              exerciseIds={dayExercises}
+              onFinished={handleTrainingSessionFinished}
+              onCancel={handleSessionCancel}
+            />
+          )}
+          {view === 'STANDALONE_EXERCISE' && standaloneExercise && StandaloneComponent && (
+            <StandaloneComponent
+              ageGroup={activeChild.ageGroup}
+              seed={standaloneExercise.seed}
+              onComplete={handleStandaloneExerciseComplete}
+              onCancel={handleSessionCancel}
+            />
+          )}
+        </ErrorBoundary>
       </div>
     );
   }

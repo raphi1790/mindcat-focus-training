@@ -20,8 +20,8 @@ import { generateFarmerTrial, type FarmerTrial } from './generator';
 const CONFIG = EXERCISE_CONFIGS.farmer;
 const FLASH_MS = 450;
 
-export default function FarmerExercise({ seed, onComplete, onCancel }: ExerciseProps) {
-  const { state, recordTrial } = useExerciseEngine('farmer', CONFIG, onComplete);
+export default function FarmerExercise({ seed, onComplete, onCancel, initialState, onLevelUp }: ExerciseProps) {
+  const { state, recordTrial } = useExerciseEngine('farmer', CONFIG, onComplete, { initialState, onLevelUp });
   const [trialId, setTrialId] = useState(0);
   const [trial, setTrial] = useState<FarmerTrial | null>(null);
   const [displayedKind, setDisplayedKind] = useState<'sheep' | 'wolf'>('sheep');

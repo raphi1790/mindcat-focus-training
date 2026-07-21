@@ -53,7 +53,7 @@ function toAssessment(input: AssessmentInput, id: string, timestamp: Date): Asse
 }
 
 function toTrainingSession(day: SimulatedTrainingDay, id: string, timestamp: Date): TrainingSession {
-  return { id, timestamp, ...trainingSessionInputSchema.parse(day.input) };
+  return { id, timestamp, status: 'completed', ...trainingSessionInputSchema.parse(day.input) };
 }
 
 export interface PilotChildReport {

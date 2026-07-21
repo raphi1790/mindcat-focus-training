@@ -45,9 +45,9 @@ interface AnticipationExerciseProps extends ExerciseProps {
   visible: boolean;
 }
 
-export default function AnticipationExercise({ seed, visible, onComplete, onCancel }: AnticipationExerciseProps) {
+export default function AnticipationExercise({ seed, visible, onComplete, onCancel, initialState, onLevelUp }: AnticipationExerciseProps) {
   const exerciseId = visible ? 'anticipation-visible' : 'anticipation-invisible';
-  const { state, recordTrial } = useExerciseEngine(exerciseId, CONFIG, onComplete);
+  const { state, recordTrial } = useExerciseEngine(exerciseId, CONFIG, onComplete, { initialState, onLevelUp });
   const [trialId, setTrialId] = useState(0);
   const [lane, setLane] = useState(HOME_LANE);
   const [targetLane, setTargetLane] = useState(0);

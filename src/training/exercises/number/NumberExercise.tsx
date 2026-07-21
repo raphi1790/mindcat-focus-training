@@ -12,8 +12,8 @@ import { generateNumberTrial, type NumberTrial } from './generator';
 const CONFIG = EXERCISE_CONFIGS.number;
 const FLASH_MS = 500;
 
-export default function NumberExercise({ seed, onComplete, onCancel }: ExerciseProps) {
-  const { state, recordTrial } = useExerciseEngine('number', CONFIG, onComplete);
+export default function NumberExercise({ seed, onComplete, onCancel, initialState, onLevelUp }: ExerciseProps) {
+  const { state, recordTrial } = useExerciseEngine('number', CONFIG, onComplete, { initialState, onLevelUp });
   const [trialId, setTrialId] = useState(0);
   const [trial, setTrial] = useState<NumberTrial | null>(null);
   const [flash, setFlash] = useState<'success' | 'error' | null>(null);

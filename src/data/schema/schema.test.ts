@@ -1,13 +1,21 @@
 import { Timestamp } from 'firebase/firestore';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   assessmentDocSchema,
   assessmentInputSchema,
   childDocSchema,
   childInputSchema,
+  exerciseProgressStateSchema,
+  trainingSessionDocSchema,
   trainingSessionInputSchema,
+  trainingSessionProgressSchema,
   trialSchema,
+  type ExerciseProgressStateShape,
 } from './index';
+import {
+  createExerciseProgress,
+  type ExerciseProgressState,
+} from '../../training/engine/exerciseProgress';
 
 const validTrial = {
   index: 0,
@@ -178,5 +186,74 @@ describe('trainingSessionInputSchema', () => {
         exercises: [{ ...exercise, exerciseId: 'tetris' }],
       }),
     ).toThrow();
+  });
+});
+
+describe('exerciseProgressStateSchema (AP6)', () => {
+  it('parst den frischen Engine-Startzustand', () => {
+    expect(() => exerciseProgressStateSchema.parse(createExerciseProgress())).not.toThrow();
+  });
+
+  it('spiegelt ExerciseProgressState strukturell (Typ-Gleichheit)', () => {
+    // Sichert ab, dass der zod-Spiegel an der Firestore-Grenze nicht vom
+    // Engine-Typ abdriftet (sonst würde Resume falsch (de)serialisieren).
+    expectTypeOf<ExerciseProgressStateShape>().toEqualTypeOf<ExerciseProgressState>();
+  });
+
+  it('lehnt ein Level < 1 ab', () => {
+    expect(() =>
+      exerciseProgressStateSchema.parse({ ...createExerciseProgress(), level: 0 }),
+    ).toThrow();
+  });
+});
+
+describe('trainingSessionDocSchema (AP6)', () => {
+  const baseDoc = {
+    sessionDay: 2,
+    ageGroupAtTest: 6,
+    rngSeed: 'mindcat-v1:day2',
+    exercises: [],
+    timestamp: Timestamp.fromDate(new Date('2026-07-20T09:00:00Z')),
+  } as const;
+
+  it('Alt-Dokument ohne status parst als completed', () => {
+    const parsed = trainingSessionDocSchema.parse(baseDoc);
+    expect(parsed.status).toBe('completed');
+    expect(parsed.checkpoint).toBeUndefined();
+  });
+
+  it('laufendes Dokument mit Checkpoint parst und wandelt Zeitstempel um', () => {
+    const parsed = trainingSessionDocSchema.parse({
+      ...baseDoc,
+      status: 'in-progress',
+      checkpoint: {
+        exerciseIndex: 1,
+        exerciseId: 'chase',
+        engineState: { ...createExerciseProgress(), level: 3, totalTrials: 12 },
+        updatedAt: Timestamp.fromDate(new Date('2026-07-20T09:05:00Z')),
+      },
+    });
+    expect(parsed.status).toBe('in-progress');
+    expect(parsed.checkpoint?.exerciseIndex).toBe(1);
+    expect(parsed.checkpoint?.engineState.level).toBe(3);
+    expect(parsed.checkpoint?.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it('lehnt unbekannten status ab', () => {
+    expect(() => trainingSessionDocSchema.parse({ ...baseDoc, status: 'paused' })).toThrow();
+  });
+});
+
+describe('trainingSessionProgressSchema (AP6)', () => {
+  it('akzeptiert nur einen Checkpoint (ohne Ergebnisliste)', () => {
+    expect(() =>
+      trainingSessionProgressSchema.parse({
+        checkpoint: { exerciseIndex: 0, exerciseId: 'side', engineState: createExerciseProgress() },
+      }),
+    ).not.toThrow();
+  });
+
+  it('akzeptiert ein leeres Update (beide Felder optional)', () => {
+    expect(() => trainingSessionProgressSchema.parse({})).not.toThrow();
   });
 });

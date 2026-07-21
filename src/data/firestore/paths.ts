@@ -15,3 +15,10 @@ export const assessmentsCollection = (db: Firestore, uid: string, childId: strin
 
 export const trainingSessionsCollection = (db: Firestore, uid: string, childId: string) =>
   collection(db, 'users', uid, 'children', childId, 'trainingSessions');
+
+export const trainingSessionDoc = (
+  db: Firestore,
+  uid: string,
+  childId: string,
+  sessionId: string,
+) => doc(db, 'users', uid, 'children', childId, 'trainingSessions', sessionId);

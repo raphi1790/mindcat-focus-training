@@ -70,6 +70,7 @@ function makeSession(overrides: Partial<TrainingSession> = {}): TrainingSession 
       },
     ],
     timestamp: new Date('2026-01-02T09:00:00.000Z'),
+    status: 'completed',
     ...overrides,
   };
 }
@@ -123,6 +124,14 @@ describe('sessionsToCsv', () => {
     );
     expect(lines[1]).toBe('s1,1,2026-01-02T09:00:00.000Z,side,2,2,21,18,2,1,5,60000');
   });
+
+  it('blendet laufende (in-progress) Sitzungen aus (AP6)', () => {
+    const running = makeSession({ id: 's2', status: 'in-progress' });
+    const csv = sessionsToCsv([makeSession(), running]);
+    // Nur Kopfzeile + eine Zeile der abgeschlossenen Sitzung.
+    expect(csv.split('\n')).toHaveLength(2);
+    expect(csv).not.toContain('s2');
+  });
 });
 
 describe('buildFullExportJson', () => {
@@ -139,6 +148,17 @@ describe('buildFullExportJson', () => {
     expect(assessment!.timestamp).toBe('2026-01-01T10:00:00.000Z');
     const [session] = json.trainingSessions as Record<string, unknown>[];
     expect(session!.timestamp).toBe('2026-01-02T09:00:00.000Z');
+  });
+
+  it('lässt laufende (in-progress) Sitzungen aus dem Export (AP6)', () => {
+    const json = buildFullExportJson(
+      { displayName: 'Kater Blau', ageGroup: 6, studyGroup: 'trained' },
+      [],
+      [makeSession(), makeSession({ id: 's2', status: 'in-progress' })],
+    ) as Record<string, unknown>;
+    const sessions = json.trainingSessions as Record<string, unknown>[];
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]!.id).toBe('s1');
   });
 
   it('setzt studyGroup auf null, wenn nicht gepflegt', () => {

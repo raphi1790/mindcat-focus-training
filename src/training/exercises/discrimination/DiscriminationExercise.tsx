@@ -49,9 +49,11 @@ export default function DiscriminationExercise({
   hasDelay,
   onComplete,
   onCancel,
+  initialState,
+  onLevelUp,
 }: DiscriminationExerciseProps) {
   const exerciseId = hasDelay ? 'discrimination-delay' : 'discrimination';
-  const { state, recordTrial } = useExerciseEngine(exerciseId, CONFIG, onComplete);
+  const { state, recordTrial } = useExerciseEngine(exerciseId, CONFIG, onComplete, { initialState, onLevelUp });
   const [trialId, setTrialId] = useState(0);
   const [trial, setTrial] = useState<DiscriminationTrial | null>(null);
   const [phase, setPhase] = useState<Phase>('study');

@@ -20,6 +20,17 @@ import {
 export interface UseExerciseEngineOptions {
   /** Rohereignisse (übungsspezifische Struktur) im `ExerciseResult` mitspeichern? */
   logRawEvents?: boolean;
+  /**
+   * Resume-Startzustand (AP6): statt frischem Fortschritt startet die Übung an
+   * einem Checkpoint (Level/Trial-Index/Statistik). Wird nur beim Mount gelesen.
+   */
+  initialState?: ExerciseProgressState;
+  /**
+   * Feuert nach jedem Level-Aufstieg mit dem neuen Zustand (AP6: Checkpoint
+   * schreiben). Genau einmal pro Aufstieg — auch unter StrictMode; beim Mount
+   * (auch bei Resume auf ein höheres Level) feuert es nicht.
+   */
+  onLevelUp?: (state: ExerciseProgressState) => void;
 }
 
 export interface ExerciseEngine {
@@ -33,17 +44,37 @@ export function useExerciseEngine(
   exerciseId: ExerciseId,
   config: LevelConfig,
   onComplete: (result: ExerciseResult) => void,
-  { logRawEvents = false }: UseExerciseEngineOptions = {},
+  { logRawEvents = false, initialState, onLevelUp }: UseExerciseEngineOptions = {},
 ): ExerciseEngine {
-  const [state, setState] = useState<ExerciseProgressState>(createExerciseProgress);
+  const [state, setState] = useState<ExerciseProgressState>(
+    () => initialState ?? createExerciseProgress(),
+  );
   const startRef = useRef(now());
   const rawEventsRef = useRef<Record<string, unknown>[]>([]);
   const onCompleteRef = useRef(onComplete);
+  const onLevelUpRef = useRef(onLevelUp);
   const firedRef = useRef(false);
+  // Höchstes Level, für das `onLevelUp` bereits gefeuert wurde. Startet auf dem
+  // Anfangslevel (auch bei Resume), damit der Mount nicht als Aufstieg zählt.
+  const lastLevelRef = useRef(state.level);
 
   useEffect(() => {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
+
+  useEffect(() => {
+    onLevelUpRef.current = onLevelUp;
+  }, [onLevelUp]);
+
+  // Checkpoint-Trigger: nach jedem echten Level-Aufstieg genau einmal. Der
+  // Ref-Guard macht das StrictMode-fest (Doppel-Setup des Effekts feuert nicht
+  // erneut) und verhindert ein Feuern beim Mount.
+  useEffect(() => {
+    if (state.level > lastLevelRef.current) {
+      lastLevelRef.current = state.level;
+      onLevelUpRef.current?.(state);
+    }
+  }, [state]);
 
   const recordTrial = useCallback(
     (outcome: TrialOutcome, rawEvent?: Record<string, unknown>) => {

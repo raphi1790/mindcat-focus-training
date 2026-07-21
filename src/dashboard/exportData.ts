@@ -99,7 +99,11 @@ export function scoresToCsv(assessments: readonly Assessment[]): string {
   return rowsToCsv(headers, rows);
 }
 
-/** Ein Übungsergebnis pro Zeile, mit Sitzungs-Kontext (Tag/Zeitstempel). */
+/**
+ * Ein Übungsergebnis pro Zeile, mit Sitzungs-Kontext (Tag/Zeitstempel).
+ * Laufende (in-progress) Sitzungen werden ausgeblendet (AP6) — sie sind noch
+ * kein Datenpunkt und erscheinen vollständig, sobald der Tag abgeschlossen ist.
+ */
 export function sessionsToCsv(sessions: readonly TrainingSession[]): string {
   const headers = [
     'sessionId',
@@ -116,7 +120,9 @@ export function sessionsToCsv(sessions: readonly TrainingSession[]): string {
     'durationMs',
   ] as const;
 
-  const rows: CsvCell[][] = sessions.flatMap((s) =>
+  const rows: CsvCell[][] = sessions
+    .filter((s) => s.status !== 'in-progress')
+    .flatMap((s) =>
     s.exercises.map((e) => [
       s.id,
       s.sessionDay,
@@ -150,7 +156,11 @@ export function buildFullExportJson(
       studyGroup: child.studyGroup ?? null,
     },
     assessments: assessments.map((a) => ({ ...a, timestamp: a.timestamp.toISOString() })),
-    trainingSessions: sessions.map((s) => ({ ...s, timestamp: s.timestamp.toISOString() })),
+    // Laufende (in-progress) Sitzungen bleiben aus dem Export (AP6); sie
+    // erscheinen vollständig, sobald der Tag als `completed` gespeichert ist.
+    trainingSessions: sessions
+      .filter((s) => s.status !== 'in-progress')
+      .map((s) => ({ ...s, timestamp: s.timestamp.toISOString() })),
   };
 }
 

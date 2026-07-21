@@ -38,6 +38,20 @@ describe('computeChildProgress', () => {
     expect(p.nextStep).toBe('training');
   });
 
+  it('laufende (in-progress) Sitzung zählt nicht als abgeschlossener Tag (AP6)', () => {
+    const p = computeChildProgress(
+      [{ phase: 'baseline', quality: ok }],
+      [
+        { sessionDay: 1, status: 'completed' },
+        { sessionDay: 2, status: 'in-progress' },
+      ],
+    );
+    // Tag 2 läuft noch → höchster abgeschlossener Tag ist 1, nächster Tag 2.
+    expect(p.completedDays).toBe(1);
+    expect(p.nextSessionDay).toBe(2);
+    expect(p.nextStep).toBe('training');
+  });
+
   it('Training fertig (Tag 5) → Post-Test steht an', () => {
     const p = computeChildProgress(
       [{ phase: 'baseline', quality: ok }],

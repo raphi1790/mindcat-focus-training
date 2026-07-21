@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
-import { addTrainingSession } from '../data/firestore';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  completeTrainingSession,
+  findInProgressSession,
+  startTrainingSession,
+  updateTrainingSessionProgress,
+} from '../data/firestore';
 import type { AgeGroup, ExerciseId, ExerciseResult, TrainingSessionInput } from '../data/schema';
 import { Confetti, soundManager } from '../ui';
+import { createExerciseProgress, type ExerciseProgressState } from './engine';
 import { EXERCISE_COMPONENTS } from './exercises';
 import { EXERCISE_ICONS, EXERCISE_LABELS } from './labels';
 import RewardScreen from './RewardScreen';
@@ -9,11 +15,17 @@ import { starsForResult } from './rewards';
 
 /**
  * Orchestriert einen Trainingstag (Vorbild: `AssessmentRunner`): führt die
- * Übungen des Tages (vom Scheduler geliefert) sequenziell aus, sammelt die
- * `ExerciseResult`e und persistiert am Ende genau ein `trainingSessions`-
- * Dokument. Speichern ist atomar (ein addDoc); schlägt es fehl, bleiben die
- * Ergebnisse im Speicher und können per Retry erneut geschrieben werden.
- * Abbruch während einer Übung (`HoldToExit`) verwirft die gesamte Sitzung.
+ * Übungen des Tages sequenziell aus, sammelt die `ExerciseResult`e und
+ * persistiert sie inkrementell in genau einem `trainingSessions`-Dokument.
+ *
+ * Absturz-Resilienz (AP6, Fix-Plan Testrunde 1): Beim Mount wird eine laufende
+ * Sitzung desselben Tages gesucht und fortgesetzt (`findInProgressSession`);
+ * sonst wird eine neue `in-progress`-Sitzung angelegt. Nach jeder Übung wird
+ * die Ergebnisliste geschrieben, nach jedem Level-Aufstieg ein Checkpoint —
+ * ein Crash/Reload überlebt damit jeden abgeschlossenen Level-Aufstieg. Am
+ * Tagesende setzt `completeTrainingSession` die Sitzung auf `completed`
+ * (danach unveränderlich). Abbruch via `HoldToExit` lässt das In-Progress-
+ * Dokument stehen → der nächste Start desselben Tages setzt fort.
  *
  * Phase 5 (Plan §6.3): Zwischen den Übungen liegt eine Belohnungsschleife
  * (`RewardScreen` mit Sternen), der Tagesabschluss feiert mit Konfetti und
@@ -32,7 +44,11 @@ interface TrainingSessionRunnerProps {
 }
 
 type RunnerState =
-  | { step: 'running'; index: number; results: ExerciseResult[] }
+  | { step: 'init' }
+  | { step: 'initError'; message: string }
+  // `initialState` nur gesetzt, wenn an dieser Übung fortgesetzt wird (Resume);
+  // Folgeübungen tragen es nicht und starten damit frisch.
+  | { step: 'running'; index: number; results: ExerciseResult[]; initialState?: ExerciseProgressState }
   | { step: 'reward'; index: number; results: ExerciseResult[] }
   | { step: 'saving'; results: ExerciseResult[] }
   | { step: 'saveError'; results: ExerciseResult[]; message: string }
@@ -63,22 +79,110 @@ export default function TrainingSessionRunner({
   onCancel,
 }: TrainingSessionRunnerProps) {
   const sessionSeed = sessionSeedForDay(sessionDay);
-  const [state, setState] = useState<RunnerState>({ step: 'running', index: 0, results: [] });
+  const [state, setState] = useState<RunnerState>({ step: 'init' });
 
-  const save = useCallback(
+  // Aktive Sitzung (außerhalb des States, da über viele Callbacks hinweg stabil
+  // benötigt; nur in Handlern/Effekten gelesen, nie im Render).
+  const sessionIdRef = useRef<string | null>(null);
+  const initRef = useRef(false);
+
+  // Beim Mount: laufende Sitzung fortsetzen oder neue anlegen. Läuft dank
+  // `initRef` genau einmal (auch unter StrictMode); der einzige Async-Lauf
+  // setzt den State der (persistenten) Instanz.
+  useEffect(() => {
+    if (initRef.current || exerciseIds.length === 0) return;
+    initRef.current = true;
+
+    void (async () => {
+      try {
+        const existing = await findInProgressSession(uid, childId, sessionDay);
+        if (existing) {
+          sessionIdRef.current = existing.id;
+          const results = existing.exercises;
+          const resumeIndex = results.length;
+          if (resumeIndex >= exerciseIds.length) {
+            // Alle Übungen bereits erledigt (Crash nach der letzten Übung, vor
+            // dem Abschluss) → jetzt abschließen und feiern.
+            await completeTrainingSession(uid, childId, existing.id, results);
+            setState({ step: 'done', results });
+            return;
+          }
+          // Checkpoint nur übernehmen, wenn er zur fortzusetzenden Übung gehört.
+          const cp = existing.checkpoint;
+          const initialState =
+            cp && cp.exerciseIndex === resumeIndex && !cp.engineState.done
+              ? cp.engineState
+              : undefined;
+          setState({ step: 'running', index: resumeIndex, results, initialState });
+          return;
+        }
+
+        const input: TrainingSessionInput = {
+          sessionDay,
+          ageGroupAtTest: ageGroup,
+          rngSeed: sessionSeed,
+          exercises: [],
+        };
+        sessionIdRef.current = await startTrainingSession(uid, childId, input);
+        setState({ step: 'running', index: 0, results: [] });
+      } catch (err) {
+        console.error('Trainingssitzung konnte nicht initialisiert werden', err);
+        setState({ step: 'initError', message: err instanceof Error ? err.message : String(err) });
+      }
+    })();
+  }, [uid, childId, sessionDay, ageGroup, sessionSeed, exerciseIds]);
+
+  // Checkpoint nach einem Level-Aufstieg (nicht-fatal: der spätere Abschluss
+  // schreibt ohnehin die vollständige Ergebnisliste).
+  const handleLevelUp = useCallback(
+    (index: number, engineState: ExerciseProgressState) => {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return;
+      void updateTrainingSessionProgress(uid, childId, sessionId, {
+        checkpoint: { exerciseIndex: index, exerciseId: exerciseIds[index]!, engineState },
+      }).catch((err) => console.error('Checkpoint konnte nicht gespeichert werden', err));
+    },
+    [uid, childId, exerciseIds],
+  );
+
+  // Übung abgeschlossen: Ergebnisliste fortschreiben und Checkpoint auf die
+  // nächste Übung (frischer Zustand) setzen. Fehler sind nicht-fatal.
+  const handleExerciseComplete = useCallback(
+    (index: number, prevResults: ExerciseResult[], result: ExerciseResult) => {
+      const results = [...prevResults, result];
+      setState({ step: 'reward', index, results });
+
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return;
+      const nextIndex = index + 1;
+      const progress =
+        nextIndex < exerciseIds.length
+          ? {
+              exercises: results,
+              checkpoint: {
+                exerciseIndex: nextIndex,
+                exerciseId: exerciseIds[nextIndex]!,
+                engineState: createExerciseProgress(),
+              },
+            }
+          : { exercises: results };
+      void updateTrainingSessionProgress(uid, childId, sessionId, progress).catch((err) =>
+        console.error('Zwischenstand konnte nicht gespeichert werden', err),
+      );
+    },
+    [uid, childId, exerciseIds],
+  );
+
+  const finish = useCallback(
     async (results: ExerciseResult[]) => {
       setState({ step: 'saving', results });
-      const input: TrainingSessionInput = {
-        sessionDay,
-        ageGroupAtTest: ageGroup,
-        rngSeed: sessionSeed,
-        exercises: results,
-      };
+      const sessionId = sessionIdRef.current;
       try {
-        await addTrainingSession(uid, childId, input);
+        if (!sessionId) throw new Error('Keine aktive Sitzung');
+        await completeTrainingSession(uid, childId, sessionId, results);
         setState({ step: 'done', results });
       } catch (err) {
-        console.error('Trainingssitzung konnte nicht gespeichert werden', err);
+        console.error('Trainingssitzung konnte nicht abgeschlossen werden', err);
         setState({
           step: 'saveError',
           results,
@@ -86,7 +190,7 @@ export default function TrainingSessionRunner({
         });
       }
     },
-    [uid, childId, sessionDay, ageGroup, sessionSeed],
+    [uid, childId],
   );
 
   // Vom Belohnungsschirm weiter — idempotent (Auto-Timer, Button und
@@ -97,29 +201,56 @@ export default function TrainingSessionRunner({
       if (prev.index + 1 < exerciseIds.length) {
         return { step: 'running', index: prev.index + 1, results: prev.results };
       }
-      // Speichern außerhalb des Updaters anstoßen.
-      queueMicrotask(() => void save(prev.results));
+      // Abschluss außerhalb des Updaters anstoßen.
+      queueMicrotask(() => void finish(prev.results));
       return { step: 'saving', results: prev.results };
     });
-  }, [exerciseIds.length, save]);
+  }, [exerciseIds.length, finish]);
 
   if (exerciseIds.length === 0) {
     // Sollte der Scheduler nie liefern, schützt aber vor einem leeren Tag.
     return null;
   }
 
+  if (state.step === 'init') {
+    return (
+      <ScreenFrame>
+        <div className="text-6xl mb-6 animate-pulse">🐱</div>
+        <h2 className="text-3xl font-bold text-slate-800 mb-2">Trainingstag wird vorbereitet…</h2>
+        <p className="text-slate-500">Einen Moment bitte.</p>
+      </ScreenFrame>
+    );
+  }
+
+  if (state.step === 'initError') {
+    return (
+      <ScreenFrame>
+        <div className="text-6xl mb-6">⚠️</div>
+        <h2 className="text-3xl font-bold text-slate-800 mb-4">Start fehlgeschlagen</h2>
+        <p className="text-sm text-slate-400 mb-8 break-words">{state.message}</p>
+        <button
+          onClick={onCancel}
+          className="w-full bg-purple-600 text-white font-bold py-4 rounded-2xl hover:bg-purple-700 transition-colors text-xl"
+        >
+          Zurück zum Dashboard
+        </button>
+      </ScreenFrame>
+    );
+  }
+
   if (state.step === 'running') {
     const exerciseId = exerciseIds[state.index]!;
     const ExerciseComponent = EXERCISE_COMPONENTS[exerciseId];
-    const { index, results } = state;
+    const { index, results, initialState } = state;
     return (
       <ExerciseComponent
+        key={`${exerciseId}-${index}`}
         ageGroup={ageGroup}
         seed={deriveExerciseSeed(sessionSeed, exerciseId)}
+        initialState={initialState}
+        onLevelUp={(engineState) => handleLevelUp(index, engineState)}
         onCancel={onCancel}
-        onComplete={(result) => {
-          setState({ step: 'reward', index, results: [...results, result] });
-        }}
+        onComplete={(result) => handleExerciseComplete(index, results, result)}
       />
     );
   }
@@ -157,7 +288,7 @@ export default function TrainingSessionRunner({
         </p>
         <p className="text-sm text-slate-400 mb-8 break-words">{state.message}</p>
         <button
-          onClick={() => void save(state.results)}
+          onClick={() => void finish(state.results)}
           className="w-full bg-purple-600 text-white font-bold py-4 rounded-2xl hover:bg-purple-700 transition-colors text-xl"
         >
           Erneut versuchen

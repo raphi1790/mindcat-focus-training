@@ -1,4 +1,5 @@
 export { default as Confetti } from './Confetti';
+export { default as ErrorBoundary } from './ErrorBoundary';
 export { default as ExerciseHud } from './ExerciseHud';
 export { default as HoldToExit } from './HoldToExit';
 export { default as LevelUpOverlay } from './LevelUpOverlay';

@@ -7,7 +7,7 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
 
 /**
  * Phase 6 (Plan §9, §3): Verifiziert `firestore.rules` gegen den Firestore-
@@ -125,26 +125,62 @@ describe('firestore.rules — Assessments (append-only)', () => {
   });
 });
 
-describe('firestore.rules — TrainingSessions (append-only)', () => {
+describe('firestore.rules — TrainingSessions (inkrementell, dann unveränderlich)', () => {
   const session = { sessionDay: 1, ageGroupAtTest: 6, rngSeed: 's', timestamp: new Date(), exercises: [] };
+  const inProgress = { ...session, status: 'in-progress' };
+  const completed = { ...session, status: 'completed' };
+
+  /** Dokument unter Umgehung der Rules seeden (reines Test-Setup). */
+  async function seed(path: string, data: Record<string, unknown>) {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), path), data);
+    });
+  }
 
   it('Betreuer darf eine Trainingssitzung anlegen und lesen', async () => {
     const db = asUser(ALICE);
     const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
-    await assertSucceeds(setDoc(ref, session));
+    await assertSucceeds(setDoc(ref, inProgress));
     await assertSucceeds(getDoc(ref));
   });
 
-  it('Trainingssitzungen sind unveränderlich: Update und Delete verboten', async () => {
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(
-        doc(ctx.firestore(), `users/${ALICE}/children/${CHILD}/trainingSessions/t1`),
-        session,
-      );
-    });
+  it('laufende Sitzung (in-progress) darf inkrementell aktualisiert werden', async () => {
+    await seed(`users/${ALICE}/children/${CHILD}/trainingSessions/t1`, inProgress);
     const db = asUser(ALICE);
     const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
-    await assertFails(setDoc(ref, { ...session, sessionDay: 2 }));
+    await assertSucceeds(updateDoc(ref, { exercises: [{ exerciseId: 'side' }] }));
+    await assertSucceeds(
+      updateDoc(ref, {
+        checkpoint: { exerciseIndex: 1, exerciseId: 'chase', engineState: {} },
+      }),
+    );
+  });
+
+  it('Abschluss-Übergang (in-progress → completed) ist erlaubt', async () => {
+    await seed(`users/${ALICE}/children/${CHILD}/trainingSessions/t1`, inProgress);
+    const db = asUser(ALICE);
+    const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
+    await assertSucceeds(updateDoc(ref, { status: 'completed' }));
+  });
+
+  it('abgeschlossene Sitzung ist unveränderlich: Update verboten', async () => {
+    await seed(`users/${ALICE}/children/${CHILD}/trainingSessions/t1`, completed);
+    const db = asUser(ALICE);
+    const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
+    await assertFails(updateDoc(ref, { sessionDay: 2 }));
+  });
+
+  it('Alt-Dokument ohne status-Feld bleibt gesperrt (Update verboten)', async () => {
+    await seed(`users/${ALICE}/children/${CHILD}/trainingSessions/t1`, session);
+    const db = asUser(ALICE);
+    const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
+    await assertFails(updateDoc(ref, { sessionDay: 2 }));
+  });
+
+  it('Löschen ist immer verboten — auch für laufende Sitzungen', async () => {
+    await seed(`users/${ALICE}/children/${CHILD}/trainingSessions/t1`, inProgress);
+    const db = asUser(ALICE);
+    const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
     await assertFails(deleteDoc(ref));
   });
 });

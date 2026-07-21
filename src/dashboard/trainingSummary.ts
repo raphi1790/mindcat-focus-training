@@ -51,8 +51,13 @@ function highestLevelOf(exercise: TrainingSession['exercises'][number]): number 
 }
 
 export function computeTrainingSummary(sessions: readonly TrainingSession[]): TrainingSummary {
+  // Laufende (in-progress) Sitzungen sind noch kein Datenpunkt (AP6): ihre
+  // abgeschlossenen Übungen tauchen erst auf, wenn der Tag als `completed`
+  // gespeichert ist (dasselbe Dokument, dann vollständig).
+  const completedSessions = sessions.filter((s) => s.status !== 'in-progress');
+
   const byDay = new Map<number, TrainingSession[]>();
-  for (const session of sessions) {
+  for (const session of completedSessions) {
     const list = byDay.get(session.sessionDay) ?? [];
     list.push(session);
     byDay.set(session.sessionDay, list);
@@ -81,7 +86,7 @@ export function computeTrainingSummary(sessions: readonly TrainingSession[]): Tr
       };
     });
 
-  const allExercises = sessions.flatMap((s) => s.exercises);
+  const allExercises = completedSessions.flatMap((s) => s.exercises);
 
   const byExerciseMap = new Map<ExerciseId, ExerciseAggregate>();
   for (const exercise of allExercises) {

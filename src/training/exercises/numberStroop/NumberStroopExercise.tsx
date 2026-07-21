@@ -48,8 +48,8 @@ function Cluster({
   );
 }
 
-export default function NumberStroopExercise({ seed, onComplete, onCancel }: ExerciseProps) {
-  const { state, recordTrial } = useExerciseEngine('number-stroop', CONFIG, onComplete);
+export default function NumberStroopExercise({ seed, onComplete, onCancel, initialState, onLevelUp }: ExerciseProps) {
+  const { state, recordTrial } = useExerciseEngine('number-stroop', CONFIG, onComplete, { initialState, onLevelUp });
   const [trialId, setTrialId] = useState(0);
   const [trial, setTrial] = useState<StroopTrial | null>(null);
   const [flash, setFlash] = useState<{ side: 'L' | 'R'; kind: 'success' | 'error' } | null>(null);

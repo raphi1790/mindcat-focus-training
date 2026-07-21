@@ -61,8 +61,8 @@ function stepRandomly(rng: Rng, pos: Pos): Pos {
   };
 }
 
-export default function ChaseExercise({ seed, onComplete, onCancel }: ExerciseProps) {
-  const { state, recordTrial } = useExerciseEngine('chase', CONFIG, onComplete);
+export default function ChaseExercise({ seed, onComplete, onCancel, initialState, onLevelUp }: ExerciseProps) {
+  const { state, recordTrial } = useExerciseEngine('chase', CONFIG, onComplete, { initialState, onLevelUp });
   const [trialId, setTrialId] = useState(0);
   const [catPos, setCatPos] = useState<Pos>(centerPos);
   // Platzhalter — die Trial-Setup-Effekt-Funktion platziert den Schirm beim

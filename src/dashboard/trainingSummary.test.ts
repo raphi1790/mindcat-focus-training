@@ -29,6 +29,7 @@ function makeSession(sessionDay: number, exercises: ExerciseResult[]): TrainingS
     rngSeed: `seed-${sessionDay}`,
     exercises,
     timestamp: new Date(2026, 0, sessionDay),
+    status: 'completed',
   };
 }
 
@@ -85,6 +86,19 @@ describe('computeTrainingSummary', () => {
     const summary = computeTrainingSummary([s1, s2]);
     expect(summary.days).toHaveLength(1);
     expect(summary.days[0]!.exercisesCompleted).toBe(2);
+  });
+
+  it('ignoriert laufende (in-progress) Sitzungen (AP6)', () => {
+    const completed = makeSession(1, [makeExercise({ exerciseId: 'side' })]);
+    const running: TrainingSession = {
+      ...makeSession(2, [makeExercise({ exerciseId: 'maze' })]),
+      status: 'in-progress',
+    };
+    const summary = computeTrainingSummary([completed, running]);
+    expect(summary.days.map((d) => d.sessionDay)).toEqual([1]);
+    expect(summary.totalDaysCompleted).toBe(1);
+    expect(summary.totalExercisesCompleted).toBe(1);
+    expect(summary.byExercise.map((e) => e.exerciseId)).toEqual(['side']);
   });
 
   it('nutzt perLevel für highestLevelReached, falls höher als highestLevel-Feld', () => {
