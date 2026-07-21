@@ -45,6 +45,12 @@ export interface GridWorldProps {
   /** Zusätzlicher Inhalt oberhalb des Gitters (z. B. Anticipation-Wasserspur). */
   aboveGrid?: ReactNode;
   catEmoji?: string;
+  /**
+   * Übersteuert die Tailwind-Klasse für 'path'-Tiles (Standard: beiger
+   * Sandboden). Side (AP5) nutzt neutrales Grau statt Beige — andere
+   * Übungen (Maze, Chase, Anticipation) bleiben unverändert.
+   */
+  pathTileClass?: string;
 }
 
 const TILE_CLASS: Record<GridTileKind, string> = {
@@ -70,6 +76,7 @@ export default function GridWorld({
   onExit,
   aboveGrid,
   catEmoji = '🐱',
+  pathTileClass,
 }: GridWorldProps) {
   const { levelUp } = useGameFeel(level, flash);
 
@@ -111,10 +118,12 @@ export default function GridWorld({
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       const decal = tileEmoji?.(x, y) ?? null;
+      const kind = tileAt(x, y);
+      const tileClass = kind === 'path' && pathTileClass ? pathTileClass : TILE_CLASS[kind];
       cells.push(
         <div
           key={`${x}-${y}`}
-          className={`w-full h-full border border-slate-200/20 flex items-center justify-center text-2xl sm:text-3xl transition-all duration-200 ${TILE_CLASS[tileAt(x, y)]}`}
+          className={`w-full h-full border border-slate-200/20 flex items-center justify-center text-2xl sm:text-3xl transition-all duration-200 ${tileClass}`}
         >
           {decal && <span className="animate-pop">{decal}</span>}
         </div>,

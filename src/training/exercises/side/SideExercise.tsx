@@ -41,16 +41,6 @@ export default function SideExercise({ onComplete, onCancel }: ExerciseProps) {
       const ny = catPos.y + dy;
       if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) return;
 
-      if (dx !== 0 && dy !== 0) {
-        // Diagonale Eck-Kollision: beide angrenzenden Tiles Schlamm → blockiert.
-        const tileX = map[catPos.y]?.[nx];
-        const tileY = map[ny]?.[catPos.x];
-        if (tileX === 1 && tileY === 1) {
-          handleTrialEnd(false);
-          return;
-        }
-      }
-
       setCatPos({ x: nx, y: ny });
       const tile = map[ny]?.[nx];
       if (tile === 1) handleTrialEnd(false);
@@ -82,6 +72,7 @@ export default function SideExercise({ onComplete, onCancel }: ExerciseProps) {
       level={state.level}
       streak={{ current: state.streak, target: CONFIG.advanceStreak }}
       counter={`${state.totalTrials} / ${CONFIG.minTrials}`}
+      pathTileClass="bg-slate-300"
       instructions={
         <>
           Bewege die Katze (🐱) mit Joystick oder Pfeiltasten zum Gras (🌿).
