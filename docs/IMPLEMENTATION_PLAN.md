@@ -265,6 +265,59 @@ Eine config-getriebene Engine (`training/engine/`), die **alle** Übungen mit ei
 
 **5-Tage-Sequenzierung:** Übungen über 5 Tage verteilen (Studie: ~9 Übungen für 4-J., ~10 für 6-J.; im Schnitt 6.8 bzw. 9.3 Übungen abgeschlossen). Scheduler (`app/`) reiht pro Tag/Alter die passenden Module; 6-J. inkl. Farmer. Reihenfolge dokumentieren; progressive Schwierigkeit.
 
+#### Präzisierungen aus Testrunde 1 (2026-07-20/21)
+
+Nach dem ersten Playtest wurden sechs Befunde geklärt und in `docs/FIX_PLAN_TESTRUNDE_1.md`
+(AP1–AP7) umgesetzt. Die folgenden Entscheidungen präzisieren die Tabelle oben und sind
+ab jetzt maßgeblich; die `a/b/c`-Parameter bleiben unverändert.
+
+- **Side — offene Fläche statt Labyrinth (AP5):** Die Schwierigkeitsmechanik ist
+  **ausschließlich** wachsender Schlamm bei schrumpfender Grasfläche (Rueda 2005,
+  *Training Program*): Level 1 hat Gras an allen vier Rändern, bis Level 7 wachsen
+  unregelmäßige Schlammflecken und das Gras schrumpft auf 1–2 Randzonen. Es gibt
+  **immer mehrere disjunkte Wege** zum Gras — kein Korridor, kein einzelner Ausgang
+  (das wäre eine Dublette der Maze-Übung). Abgesichert in `side/maps.test.ts`
+  (BFS-Erreichbarkeit, monoton wachsender Schlamm, Mindest-Freiraumquoten).
+- **Maze — Wände blockieren statt bestrafen (AP4):** Ein Schritt gegen eine Wand wird
+  nicht ausgeführt (kurzes Bump-Feedback), beendet aber **weder den Trial noch setzt er
+  zurück**. Die Studie gibt eine Bestrafung nicht her; trainiert wird Antizipation/
+  Planung, nicht Präzisionssteuerung. Ein Trial endet nur durch Erreichen des Ziels
+  (konsistent mit c=1: jedes Labyrinth genau einmal lösen). Wand-Bumps werden als
+  `rawEvents` (`{ type: 'wallBump', … }`) geloggt, bleiben also auswertbar. Eingabe für
+  Maze ist **4-Wege** (`useDirectionalInput` mode `'4-way'`), damit ein schräg
+  gehaltener Joystick keine Diagonalschritte in die Wand erzeugt.
+- **Discrimination-Delay — Vorlage bleibt verborgen (AP2):** In der Delay-Variante
+  verschwindet die Vorlage vor dem Auswahl-Array und taucht während der Auswahl
+  **nicht** wieder auf (sonst wäre die Arbeitsgedächtnis-Komponente wirkungslos). Die
+  Variante ohne Delay zeigt die Vorlage weiterhin durchgehend.
+- **Deterministische Sequenzen (AP3):** Der Sitzungs-Seed ist keine Zufalls-UUID mehr,
+  sondern fix je Trainingstag: `mindcat-v1:day{n}`, daraus abgeleitet je Übung
+  `mindcat-v1:day{n}:{exerciseId}`. **Jedes Kind sieht an Tag n exakt dieselben
+  Sequenzen** (Vergleichbarkeit zwischen Kindern). Innerhalb einer Übung zieht jeder
+  Trial aus einem **eigenen Sub-RNG** `createTrialRng(seed, trialIndex)` statt aus einem
+  fortlaufenden Strom — dadurch ist Trial k unabhängig davon, wie viele Züge frühere
+  Trials verbraucht haben (bei Chase laufzeitabhängig), StrictMode-Doppelläufe
+  verschieben die Sequenz nicht (Dev = Prod), und ein Resume nach Absturz reproduziert
+  exakt dieselben Trials. Freie Einzelübungen nutzen `mindcat-v1:practice:{exerciseId}`.
+  **Der ANT bleibt unverändert** bei einem frischen Zufalls-Seed je Assessment.
+- **Inkrementelle Persistenz + Resume (AP6):** Ein Trainingstag wird nicht mehr erst am
+  Ende geschrieben. Beim Start entsteht ein `trainingSessions`-Dokument mit
+  `status: 'in-progress'`; nach jeder abgeschlossenen Übung wird die Ergebnisliste
+  fortgeschrieben, nach jedem Level-Aufstieg ein `checkpoint` (Übungsindex +
+  Engine-Zustand). Am Tagesende setzt der Abschluss `status: 'completed'` und entfernt
+  den Checkpoint. Ein Absturz/Reload — auch ein Abbruch via `HoldToExit` — setzt beim
+  nächsten Start desselben Tages am letzten Checkpoint fort (Trials innerhalb des
+  angebrochenen Levels dürfen verloren gehen). **Laufende Sitzungen zählen nirgends als
+  abgeschlossener Tag** (Fortschritt, Dashboard-Summary, CSV/JSON-Export filtern sie).
+  `firestore.rules` erlaubt `update` nur, solange `resource.data.status == 'in-progress'`
+  — nach dem Abschluss ist das Dokument wieder unveränderlich, `delete` bleibt gesperrt.
+  Ein `ErrorBoundary` um den Übungsbereich fängt Renderfehler kindgerecht ab.
+- **Trial-Abschluss genau einmal (AP1, §6.1):** `endTrial` darf **nie** in einer
+  React-State-Updater-Funktion stehen (StrictMode ruft Updater im Dev doppelt auf →
+  Doppelzählung). Bewegung/Timer laufen über Refs, der Abschluss über ein
+  `trialGate` (erste Schließung gewinnt) — schützt zusätzlich gegen die Race
+  Timer↔Bewegung. Regressionstests laufen bewusst **in StrictMode**.
+
 ### 6.3 Game-Feel („Mario-Kart"-Niveau) — nur Training
 
 - **Konsistente Art-Direction:** freundliches Katzen-Maskottchen, Welt-Thema, weiche Animationen, Partikel/Juice bei Erfolg, Level-Up-Belohnungen, Sterne/Fortschritt.
