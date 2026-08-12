@@ -1,0 +1,8 @@
+.env
+.env.dev
+.vite
+.DS_Store
+dist/
+node_modules/
+node_modules/
+firestore-debug.log
