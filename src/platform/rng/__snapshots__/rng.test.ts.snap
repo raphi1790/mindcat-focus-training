@@ -1,0 +1,11 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`createTrialRng > Seed-Ableitung ist stabil (Snapshot erste 5 Trials, mindcat-v1:day1:chase) 1`] = `
+[
+  0.8977409899234772,
+  0.05577662284485996,
+  0.5399143267422915,
+  0.6161721865646541,
+  0.7014562208205462,
+]
+`;

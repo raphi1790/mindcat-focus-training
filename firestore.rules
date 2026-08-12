@@ -1,0 +1,44 @@
+rules_version = '2';
+
+// Kinderdaten sind sensibel: Jeder Betreuer (auth.uid) darf ausschließlich
+// seinen eigenen Teilbaum users/{uid}/** lesen und schreiben.
+// Die alte flache Collection `testResults` ist deprecated und gesperrt.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      match /children/{childId} {
+        allow read, write: if isOwner(uid);
+
+        match /assessments/{assessmentId} {
+          allow read, create: if isOwner(uid);
+          // Assessments sind wissenschaftliche Messungen: nachträgliches
+          // Ändern/Löschen ist nicht vorgesehen (Datenintegrität).
+          allow update, delete: if false;
+        }
+
+        match /trainingSessions/{sessionId} {
+          allow read, create: if isOwner(uid);
+          // Inkrementelles Speichern (AP6): Updates nur, solange die Sitzung
+          // läuft (`status == 'in-progress'` im *bestehenden* Dokument). Der
+          // Abschluss-Übergang (status → 'completed') fällt darunter; danach
+          // ist das Dokument wieder unveränderlich. Alt-Dokumente ohne
+          // status-Feld bleiben gesperrt. Löschen bleibt verboten.
+          allow update: if isOwner(uid) && resource.data.status == 'in-progress';
+          allow delete: if false;
+        }
+      }
+    }
+
+    // Alles andere (inkl. Legacy `testResults`) ist gesperrt.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+  }
+}
