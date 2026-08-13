@@ -48,6 +48,28 @@ function reachesGrass(map: number[][], start: [number, number], blocked?: [numbe
   return false;
 }
 
+/** Berechnet die minimale Schrittanzahl von Start bis zum ersten Ziel-Tile (Gras). */
+function minStepsToGrass(map: number[][], start: [number, number]): number {
+  const key = (x: number, y: number) => `${x},${y}`;
+  const seen = new Set([key(...start)]);
+  const queue: [number, number, number][] = [[...start, 0]];
+  while (queue.length > 0) {
+    const [x, y, steps] = queue.shift()!;
+    if (map[y]?.[x] === 2) return steps;
+    for (const [dx, dy] of DIRS8) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (ny < 0 || ny >= map.length || nx < 0 || nx >= (map[ny]?.length ?? 0)) continue;
+      if (map[ny]?.[nx] === 1) continue;
+      const k = key(nx, ny);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      queue.push([nx, ny, steps + 1]);
+    }
+  }
+  return Infinity;
+}
+
 /**
  * Menger-Proxy für "≥ 2 disjunkte Pfade": wenn das Entfernen jedes einzelnen
  * sicheren Pfad-Tiles (0) die Start→Gras-Erreichbarkeit nicht zerstört, gibt
@@ -82,7 +104,7 @@ function countTiles(map: number[][]) {
   return { mud, grass, safe };
 }
 
-describe('Side — Level-Karten (AP5: wachsender Schlamm statt Labyrinth)', () => {
+describe('Side — Level-Karten (AP1: Ziel-Grasfelder & verteilte Schlammpfützen)', () => {
   it('hat genau 7 Level, alle GRID_SIZE × GRID_SIZE groß', () => {
     expect(LEVELS).toEqual([1, 2, 3, 4, 5, 6, 7]);
     for (const level of LEVELS) {
@@ -113,6 +135,15 @@ describe('Side — Level-Karten (AP5: wachsender Schlamm statt Labyrinth)', () =
       const map = LEVEL_MAPS[level]!;
       const start = findCells(map, 3)[0]!;
       expect(reachesGrass(map, start), `Level ${level} sollte lösbar sein`).toBe(true);
+    }
+  });
+
+  it('kein 1-Schritt-Shortcut: Mindestabstand vom Start zum Gras beträgt in allen Leveln ≥ 4 Schritte', () => {
+    for (const level of LEVELS) {
+      const map = LEVEL_MAPS[level]!;
+      const start = findCells(map, 3)[0]!;
+      const steps = minStepsToGrass(map, start);
+      expect(steps, `Level ${level}: Mindestabstand zum Gras sollte ≥ 4 Schritte sein`).toBeGreaterThanOrEqual(4);
     }
   });
 
@@ -152,3 +183,4 @@ describe('Side — Level-Karten (AP5: wachsender Schlamm statt Labyrinth)', () =
     expect(level7.safe / totalTiles).toBeGreaterThanOrEqual(0.2);
   });
 });
+

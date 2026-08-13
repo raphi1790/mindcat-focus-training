@@ -71,7 +71,11 @@ export default function ChildDashboard({ uid, child }: ChildDashboardProps) {
           </div>
           {excludedAssessments.map((a) => (
             <p key={a.id} className="text-sm text-amber-700">
-              Der <strong>{a.phase.toUpperCase()}</strong>-Testlauf ({new Date(a.timestamp.seconds * 1000).toLocaleDateString()}) wurde aufgrund hoher Fehlerrate (<strong>{(a.scores.overallErrorRate * 100).toFixed(1)} %</strong>, Schwelle: &gt; 40 %) von der statistischen Prä/Post-Auswertung ausgeschlossen.
+              Der <strong>{a.phase.toUpperCase()}</strong>-Testlauf (
+              {a.timestamp instanceof Date
+                ? a.timestamp.toLocaleDateString()
+                : new Date((a.timestamp as { seconds?: number }).seconds ? (a.timestamp as { seconds: number }).seconds * 1000 : String(a.timestamp)).toLocaleDateString()}
+              ) wurde aufgrund hoher Fehlerrate (<strong>{(a.scores.overallErrorRate * 100).toFixed(1)} %</strong>, Schwelle: &gt; 40 %) von der statistischen Prä/Post-Auswertung ausgeschlossen.
             </p>
           ))}
         </div>
