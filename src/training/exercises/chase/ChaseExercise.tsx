@@ -154,7 +154,16 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
         y: Math.min(Math.max(prev.y + dy, 0), GRID_SIZE - 1),
       };
       updateCatPos(next);
-      if (next.x === targetPosRef.current.x && next.y === targetPosRef.current.y) {
+
+      const target = targetPosRef.current;
+      const isDiagonal = dx !== 0 && dy !== 0;
+      const caughtDirectly = next.x === target.x && next.y === target.y;
+      const caughtIntermediate =
+        isDiagonal &&
+        ((prev.x + dx === target.x && prev.y === target.y) ||
+          (prev.x === target.x && prev.y + dy === target.y));
+
+      if (caughtDirectly || caughtIntermediate) {
         endTrialRef.current(true);
       }
     },
@@ -172,17 +181,23 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
     return () => clearTimeout(timeout);
   }, [flash]);
 
+  const speedIcon = state.level >= 4 ? '💨⚡' : state.level >= 2 ? '⚡' : '';
+  const counterText = speedIcon
+    ? `${speedIcon} Zeit: ${(remainingMs / 1000).toFixed(1)}s`
+    : `Zeit: ${(remainingMs / 1000).toFixed(1)}s`;
+  const umbrellaEmoji = state.level >= 3 ? '💨🌂' : '🌂';
+
   return (
     <GridWorld
       cols={GRID_SIZE}
       rows={GRID_SIZE}
       tileAt={(x, y) => (x === targetPos.x && y === targetPos.y ? 'target' : 'path')}
-      tileEmoji={(x, y) => (x === targetPos.x && y === targetPos.y ? '🌂' : null)}
+      tileEmoji={(x, y) => (x === targetPos.x && y === targetPos.y ? umbrellaEmoji : null)}
       catPos={catPos}
       flash={flash}
       level={state.level}
       streak={{ current: state.streak, target: CONFIG.advanceStreak }}
-      counter={`Zeit: ${(remainingMs / 1000).toFixed(1)}s`}
+      counter={counterText}
       catEmoji="🐱"
       instructions={
         <>

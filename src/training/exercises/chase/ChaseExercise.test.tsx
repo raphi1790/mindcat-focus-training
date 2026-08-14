@@ -3,6 +3,7 @@ import { StrictMode, act } from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTrialRng } from '../../../platform/rng';
+import { createExerciseProgress } from '../../engine/exerciseProgress';
 import ChaseExercise from './ChaseExercise';
 
 /**
@@ -104,3 +105,45 @@ describe('ChaseExercise — kein Doppelzählen unter StrictMode (AP1/Befund A)',
     expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
   });
 });
+
+describe('ChaseExercise — AP2 (8-Wege-Diagonal-Treffererkennung & HUD-Visualisierung)', () => {
+  function findSeedForTarget(predicate: (pos: { x: number; y: number }) => boolean): string {
+    for (let i = 0; i < 1000; i++) {
+      const s = `seed-ap2-${i}`;
+      if (predicate(targetPosForTrial0(s))) return s;
+    }
+    throw new Error('Kein passender Seed gefunden');
+  }
+
+  it('fängt den Schirm auf einem Zwischenfeld bei einem Diagonalschritt', () => {
+    // Schirm steht auf (5, 4) — direkt rechts von der Katze (4, 4)
+    const seed = findSeedForTarget((pos) => pos.x === 5 && pos.y === 4);
+
+    const { container } = render(
+      <ChaseExercise ageGroup={4} seed={seed} onComplete={() => {}} onCancel={() => {}} />,
+    );
+
+    expect(streakLabel(container)).toBe('0 von 3 Sternen bis zum nächsten Level');
+
+    // Katze bewegt sich diagonal nach unten-rechts (dx: 1, dy: 1) von (4, 4) nach (5, 5)
+    // Das überstrichene Zwischenfeld (prev.x + dx, prev.y) ist (5, 4) -> Schirm getroffen!
+    pressDirection(1, 1);
+
+    expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
+  });
+
+  it('zeigt Geschwindigkeits-Icon (⚡) im HUD ab Level 2 an', () => {
+    const { container } = render(
+      <ChaseExercise
+        ageGroup={4}
+        seed={SEED}
+        initialState={{ ...createExerciseProgress(), level: 2 }}
+        onComplete={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(container.textContent).toContain('⚡');
+  });
+});
+
