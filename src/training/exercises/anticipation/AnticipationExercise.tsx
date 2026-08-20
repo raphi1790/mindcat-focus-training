@@ -167,7 +167,9 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
       aboveGrid={
         <div className="mt-16 w-[90vw] max-w-[600px] grid gap-2" style={{ gridTemplateColumns: `repeat(${LANES}, 1fr)` }}>
           {Array.from({ length: LANES }, (_, i) => {
-            const duckApproaching = visible && phase === 'approaching' && markerLane === i;
+            const duckApproaching = visible
+              ? phase === 'approaching' && markerLane === i
+              : phase === 'approaching' && elapsedMs < 800 && targetLane === i;
             const duckSurfaced = phase === 'catchable' && targetLane === i;
             return (
               <div
