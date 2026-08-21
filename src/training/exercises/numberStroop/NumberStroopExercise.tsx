@@ -104,11 +104,23 @@ export default function NumberStroopExercise({ seed, onComplete, onCancel, initi
       level={state.level}
       streak={{ current: state.streak, target: CONFIG.advanceStreak }}
       counter={`${state.totalTrials} / ${CONFIG.minTrials}`}
-      heading="Welche Seite hat mehr?"
+      heading={
+        <span className="inline-flex items-center gap-2">
+          <span className="text-3xl" role="img" aria-label="Menge">
+            📦
+          </span>
+          <span>Welche Seite hat MEHR Gegenstände?</span>
+        </span>
+      }
       instructions={
-        <>
-          Drücke <strong>links</strong> oder <strong>rechts</strong> — welche Seite hat mehr?
-        </>
+        <span className="inline-flex items-center gap-2 flex-wrap justify-center">
+          <span className="text-xl" role="img" aria-label="Anzahl">
+            📊
+          </span>
+          <span>
+            Drücke <strong>links</strong> oder <strong>rechts</strong> — zähle, wo <strong>MEHR</strong> Dinge sind!
+          </span>
+        </span>
       }
       flash={flash?.kind ?? null}
       onExit={onCancel}
