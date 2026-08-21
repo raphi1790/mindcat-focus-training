@@ -3,6 +3,7 @@ import { StrictMode, act } from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTrialRng } from '../../../platform/rng';
+import AnticipationInvisible from './AnticipationInvisible';
 import AnticipationVisible from './AnticipationVisible';
 
 /**
@@ -114,3 +115,29 @@ describe('AnticipationExercise — kein Doppelzählen unter StrictMode (AP1/Befu
     expect(container.textContent).toContain('1 / 21');
   });
 });
+
+describe('AnticipationInvisible — 800 ms Einstiegs-Cue vor dem Untertauchen (AP4)', () => {
+  it('Ente ist in den ersten 800 ms sichtbar, taucht danach ab und taucht am Ende wieder auf', () => {
+    const { container } = render(
+      <StrictMode>
+        <AnticipationInvisible ageGroup={4} seed={SEED} onComplete={() => {}} onCancel={() => {}} />
+      </StrictMode>,
+    );
+
+    // 1. Zu Beginn (t = 0 ms < 800 ms): Einstiegs-Cue — Ente ist in der Zielspur sichtbar.
+    expect(container.textContent).toContain('🦆');
+
+    // 2. Nach 800 ms (t = 800 ms): Ente taucht unter.
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    expect(container.textContent).not.toContain('🦆');
+
+    // 3. Nach Ablauf der Anflugphase (t = 3600 ms): Ente taucht am Zielort wieder auf.
+    act(() => {
+      vi.advanceTimersByTime(TRAVEL_MS_L1 - 800);
+    });
+    expect(container.textContent).toContain('🦆');
+  });
+});
+

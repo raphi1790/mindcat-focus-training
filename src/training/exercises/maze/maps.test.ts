@@ -68,4 +68,30 @@ describe('Maze — Level-Karten', () => {
       expect(map[pos.y]?.[pos.x]).toBe(3);
     }
   });
+
+  it('Level 1–3 haben durchgehend mindestens 2 Felder breite Korridore (AP3)', () => {
+    const isWalkable = (map: number[][], x: number, y: number) => {
+      if (y < 0 || y >= map.length || x < 0 || x >= (map[y]?.length ?? 0)) return false;
+      return map[y]![x] !== 1;
+    };
+
+    const has2TileCorridors = (map: number[][]) => {
+      for (let y = 0; y < map.length; y++) {
+        for (let x = 0; x < (map[y]?.length ?? 0); x++) {
+          if (!isWalkable(map, x, y)) continue;
+          const hasHorizontal = isWalkable(map, x - 1, y) || isWalkable(map, x + 1, y);
+          const hasVertical = isWalkable(map, x, y - 1) || isWalkable(map, x, y + 1);
+          if (!hasHorizontal || !hasVertical) return false;
+        }
+      }
+      return true;
+    };
+
+    expect(has2TileCorridors(LEVEL_MAPS[1]!), 'Level 1 hat 2-Feld-breite Korridore').toBe(true);
+    expect(has2TileCorridors(LEVEL_MAPS[2]!), 'Level 2 hat 2-Feld-breite Korridore').toBe(true);
+    expect(has2TileCorridors(LEVEL_MAPS[3]!), 'Level 3 hat 2-Feld-breite Korridore').toBe(true);
+
+    // Höhere Level (4–6) besitzen schmalere 1-Feld-Korridore
+    expect(has2TileCorridors(LEVEL_MAPS[4]!)).toBe(false);
+  });
 });
