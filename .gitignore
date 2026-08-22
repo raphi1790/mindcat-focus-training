@@ -34,4 +34,5 @@ firebase-debug.log
 ui-debug.log
 .vite/deps/_metadata.json
 .gitignore
-.vite/deps/package.json
+# Local Agent Worktrees
+.worktrees/
