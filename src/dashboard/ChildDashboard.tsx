@@ -1,9 +1,11 @@
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import type { Child } from '../data/schema';
 import EffectComparisonChart from './charts/EffectComparisonChart';
+import ExerciseLevelGrid from './charts/ExerciseLevelGrid';
 import GroupComparisonChart from './charts/GroupComparisonChart';
 import RtHistogramChart from './charts/RtHistogramChart';
 import TrainingProgressChart from './charts/TrainingProgressChart';
+import { computeExerciseLevelOverview } from './exerciseLevelStatus';
 import {
   buildFullExportJson,
   downloadTextFile,
@@ -28,6 +30,10 @@ export default function ChildDashboard({ uid, child }: ChildDashboardProps) {
   const { loading, error, assessments, sessions, effectSummary, trainingSummary, histogram } =
     useChildDashboardData(uid, child.id);
   const group = useGroupComparisonData(uid);
+  const exerciseOverview = useMemo(
+    () => computeExerciseLevelOverview(sessions, child.ageGroup),
+    [sessions, child.ageGroup],
+  );
 
   if (loading) {
     return <p className="text-slate-400">Auswertung wird geladen…</p>;
@@ -113,7 +119,15 @@ export default function ChildDashboard({ uid, child }: ChildDashboardProps) {
       </Section>
 
       <Section title="Trainingsverlauf">
-        <TrainingProgressChart summary={trainingSummary} />
+        <div className="space-y-6">
+          <ExerciseLevelGrid overview={exerciseOverview} />
+          <div className="pt-4 border-t border-slate-100">
+            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+              Verlauf über die 5 Trainingstage
+            </h4>
+            <TrainingProgressChart summary={trainingSummary} />
+          </div>
+        </div>
       </Section>
 
       <Section title="RT-Verteilung (korrekte Trials)">
