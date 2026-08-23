@@ -70,3 +70,4 @@ npm run agent:finish <ISSUE_ID>
 1. **Kein Direkt-Push auf `main`**: Alle Änderungen laufen über Worktrees, Branches (`feat/issue-<id>`) und PRs.
 2. **Keine kaputten Builds pushen**: Ein Branch darf niemals gepusht werden, wenn `npm run lint` oder `npm test` fehlschlagen.
 3. **Fokussierte PRs**: Bearbeite nur die Aufgaben des jeweiligen GitHub Issues.
+4. **KEIN automatischer Merge & KEIN Schließen von Issues**: Der Agent erstellt den PR (`gh pr create`) und setzt das Issue-Label auf `status:human-review`. Der PR und das GitHub Issue bleiben **ausdrücklich offen**, bis ein menschlicher Entwickler sie im Human Review prüft und freigibt.
