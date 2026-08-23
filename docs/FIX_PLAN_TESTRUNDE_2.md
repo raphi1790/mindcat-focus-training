@@ -2,7 +2,7 @@
 
 Dieses Dokument enthält die **geklärten Ursachen, Studienabgleiche** sowie den **schrittweisen Arbeitsplan (AP1–AP7)** für die zweite Runde an Anpassungen nach dem Nutzerfeedback. 
 
-Konventionen aus `CLAUDE.md`, `docs/IMPLEMENTATION_PLAN.md` und `docs/FIX_PLAN_TESTRUNDE_1.md` gelten unverändert (TypeScript, zod an der Firestore-Grenze, Vitest-Pflicht für wissenschaftliche Logik, Zielgruppe 4- und 6-jährige Kinder mit Speedlink Arcade-Joystick oder Tastatur).
+Konventionen aus `AGENTS.md`, `docs/IMPLEMENTATION_PLAN.md` und `docs/FIX_PLAN_TESTRUNDE_1.md` gelten unverändert (TypeScript, zod an der Firestore-Grenze, Vitest-Pflicht für wissenschaftliche Logik, Zielgruppe 4- und 6-jährige Kinder mit Speedlink Arcade-Joystick oder Tastatur).
 
 ---
 

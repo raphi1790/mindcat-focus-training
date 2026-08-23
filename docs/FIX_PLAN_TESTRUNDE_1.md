@@ -2,7 +2,7 @@
 
 Beim lokalen Testen wurden 6 Probleme gefunden. Dieses Dokument enthält die
 **geklärten Ursachen** und einen **schrittweisen Arbeitsplan** (AP1–AP7) für das
-ausführende Modell. Konventionen aus `CLAUDE.md` und `docs/IMPLEMENTATION_PLAN.md`
+ausführende Modell. Konventionen aus `AGENTS.md` und `docs/IMPLEMENTATION_PLAN.md`
 gelten unverändert (TypeScript, zod an der Firestore-Grenze, Vitest-Pflicht für
 wissenschaftliche Logik, deutsche UI-Sprache).
 

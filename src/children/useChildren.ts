@@ -4,7 +4,7 @@ import type { Child, ChildInput } from '../data/schema';
 
 /**
  * Kinder-Liste + CRUD für einen Betreuer (uid). Kapselt childrenRepo, damit
- * Komponenten nie direkt Firestore aufrufen (CLAUDE.md-Regel).
+ * Komponenten nie direkt Firestore aufrufen (AGENTS.md-Regel).
  */
 export interface UseChildrenResult {
   children: Child[];

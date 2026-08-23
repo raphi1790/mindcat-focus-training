@@ -1,6 +1,6 @@
 /**
  * @deprecated Diese Datei ist Alt-Code aus Phase 0 und **nicht mehr der Weg
- * für neue Daten** (CLAUDE.md: "Die alte flache testResults-Collection ist
+ * für neue Daten** (AGENTS.md: "Die alte flache testResults-Collection ist
  * deprecated"). Sie schreibt/liest die flache `testResults`-Collection, die
  * seit Phase 0 auch durch firestore.rules gesperrt ist (jeder Zugriff via
  * `allow read, write: if false` im Catch-all außerhalb von users/{uid}/**).
