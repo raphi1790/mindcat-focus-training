@@ -5,10 +5,23 @@ import { AssessmentRunner } from './assessment';
 import { ChildProvider, ChildManagement, ChildSelectionScreen, useChildContext } from './children';
 import { useChildrenProgress } from './children/useChildrenProgress';
 import { ChildDashboard } from './dashboard';
+import {
+  completeTrainingSession,
+  getLatestStandaloneLevel,
+  startStandaloneSession,
+  updateTrainingSessionProgress,
+} from './data/firestore';
 import { getExerciseSetForAge } from './data/exerciseSet';
 import type { NextStep } from './data/progress';
-import type { AssessmentPhase, ExerciseId } from './data/schema';
-import { buildTrainingPlan, EXERCISE_COMPONENTS, EXERCISE_ICONS, EXERCISE_LABELS, TrainingSessionRunner } from './training';
+import type { AssessmentPhase, ExerciseId, ExerciseResult } from './data/schema';
+import {
+  buildTrainingPlan,
+  EXERCISE_COMPONENTS,
+  EXERCISE_ICONS,
+  EXERCISE_LABELS,
+  TrainingSessionRunner,
+} from './training';
+import { createExerciseProgress, type ExerciseProgressState } from './training/engine';
 import { ErrorBoundary } from './ui';
 
 /**
@@ -25,8 +38,8 @@ import { ErrorBoundary } from './ui';
  * Trainingstage laufen über `TrainingSessionRunner`: der `buildTrainingPlan`-
  * Scheduler bestimmt die Übungen des jeweils nächsten Tages, das Ergebnis
  * wird als vollständiges `trainingSessions`-Dokument persistiert. Freie
- * Einzelübungen aus dem "Einzeltests"-Tab laufen standalone (ohne
- * Persistierung, analog zur Interim-Messung des ANT).
+ * Einzelübungen aus dem "Einzeltests"-Tab laufen standalone mit
+ * Checkpoint-Persistierung und automatischem Level-Wiedereinstieg (Issue #15).
  */
 
 // Interne Modul-Navigation innerhalb des Dashboards eines aktiven Kindes.
@@ -70,10 +83,13 @@ function DashboardShell() {
   // Phase des aktuell laufenden ANT (baseline/post aus dem Fortschritt,
   // interim beim Standalone-Start aus dem Tests-Tab).
   const [assessmentPhase, setAssessmentPhase] = useState<AssessmentPhase>('interim');
-  // Freier Einzelstart einer Übung aus dem Tests-Tab (Seed fix pro Lauf).
-  const [standaloneExercise, setStandaloneExercise] = useState<{ id: ExerciseId; seed: string } | null>(
-    null,
-  );
+  // Freier Einzelstart einer Übung aus dem Tests-Tab mit Checkpoint & Level-Resume (Issue #15).
+  const [standaloneExercise, setStandaloneExercise] = useState<{
+    id: ExerciseId;
+    seed: string;
+    sessionId: string;
+    initialLevel: number;
+  } | null>(null);
 
   const childId = activeChild?.id ?? null;
   const { progress, refresh: refreshProgress } = useChildrenProgress(uid, childId ? [childId] : []);
@@ -114,15 +130,42 @@ function DashboardShell() {
     setView('ASSESSMENT');
   };
 
-  const handleStandaloneExercise = (id: ExerciseId) => {
+  const handleStandaloneExercise = async (id: ExerciseId) => {
+    if (!activeChild) return;
     // Fester Seed statt Zufalls-UUID (AP3, Fix-Plan Testrunde 1) — auch der
     // freie Einzeltest liefert damit reproduzierbare Sequenzen.
-    setStandaloneExercise({ id, seed: `mindcat-v1:practice:${id}` });
-    setView('STANDALONE_EXERCISE');
+    const seed = `mindcat-v1:practice:${id}`;
+    try {
+      const initialLevel = await getLatestStandaloneLevel(uid, activeChild.id, id);
+      const sessionId = await startStandaloneSession(uid, activeChild.id, {
+        exerciseId: id,
+        ageGroup: activeChild.ageGroup,
+        rngSeed: seed,
+        initialLevel,
+      });
+      setStandaloneExercise({ id, seed, sessionId, initialLevel });
+      setView('STANDALONE_EXERCISE');
+    } catch (err) {
+      console.error('Standalone-Übung konnte nicht initialisiert werden', err);
+      setStandaloneExercise({ id, seed, sessionId: '', initialLevel: 1 });
+      setView('STANDALONE_EXERCISE');
+    }
+  };
+
+  const handleStandaloneLevelUp = (engineState: ExerciseProgressState) => {
+    if (!standaloneExercise?.sessionId || !activeChild) return;
+    void updateTrainingSessionProgress(uid, activeChild.id, standaloneExercise.sessionId, {
+      checkpoint: {
+        exerciseIndex: 0,
+        exerciseId: standaloneExercise.id,
+        engineState,
+      },
+    }).catch((err) => console.error('Standalone-Checkpoint konnte nicht gespeichert werden', err));
   };
 
   const handleSessionCancel = () => {
     setStandaloneExercise(null);
+    refreshProgress();
     setView('DASHBOARD');
   };
 
@@ -138,8 +181,16 @@ function DashboardShell() {
     setView('DASHBOARD');
   };
 
-  const handleStandaloneExerciseComplete = () => {
+  const handleStandaloneExerciseComplete = async (result: ExerciseResult) => {
+    if (standaloneExercise?.sessionId && activeChild) {
+      try {
+        await completeTrainingSession(uid, activeChild.id, standaloneExercise.sessionId, [result]);
+      } catch (err) {
+        console.error('Standalone-Sitzung konnte nicht abgeschlossen werden', err);
+      }
+    }
     setStandaloneExercise(null);
+    refreshProgress();
     setView('DASHBOARD');
   };
 
@@ -184,7 +235,9 @@ function DashboardShell() {
             <StandaloneComponent
               ageGroup={activeChild.ageGroup}
               seed={standaloneExercise.seed}
-              onComplete={handleStandaloneExerciseComplete}
+              initialState={{ ...createExerciseProgress(), level: standaloneExercise.initialLevel }}
+              onLevelUp={handleStandaloneLevelUp}
+              onComplete={(result) => void handleStandaloneExerciseComplete(result)}
               onCancel={handleSessionCancel}
             />
           )}
@@ -367,7 +420,7 @@ function DashboardShell() {
               )}
             </div>
 
-            <ChildDashboard uid={uid} child={activeChild} />
+            <ChildDashboard uid={uid} child={activeChild} onReset={refreshProgress} />
           </div>
         )}
       </div>

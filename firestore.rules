@@ -15,8 +15,9 @@ service cloud.firestore {
         match /assessments/{assessmentId} {
           allow read, create: if isOwner(uid);
           // Assessments sind wissenschaftliche Messungen: nachträgliches
-          // Ändern/Löschen ist nicht vorgesehen (Datenintegrität).
-          allow update, delete: if false;
+          // Ändern ist verboten. Löschen ist für den Betreuer erlaubt (Reset).
+          allow update: if false;
+          allow delete: if isOwner(uid);
         }
 
         match /trainingSessions/{sessionId} {
@@ -25,9 +26,10 @@ service cloud.firestore {
           // läuft (`status == 'in-progress'` im *bestehenden* Dokument). Der
           // Abschluss-Übergang (status → 'completed') fällt darunter; danach
           // ist das Dokument wieder unveränderlich. Alt-Dokumente ohne
-          // status-Feld bleiben gesperrt. Löschen bleibt verboten.
+          // status-Feld bleiben gesperrt.
+          // Löschen ist für den Betreuer erlaubt (Spielstand-Reset, Issue #15).
           allow update: if isOwner(uid) && resource.data.status == 'in-progress';
-          allow delete: if false;
+          allow delete: if isOwner(uid);
         }
       }
     }

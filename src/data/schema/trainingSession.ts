@@ -94,15 +94,21 @@ export const trainingCheckpointSchema = trainingCheckpointInputSchema.extend({
 });
 export type TrainingCheckpoint = z.infer<typeof trainingCheckpointSchema>;
 
+/** Modus einer Trainingssitzung: Standard-Protokoll vs. freie Einzelübung. */
+export const trainingSessionModeSchema = z.enum(['training', 'standalone']);
+export type TrainingSessionMode = z.infer<typeof trainingSessionModeSchema>;
+
 /** Create-Payload (Zeitstempel setzt der Server). */
 export const trainingSessionInputSchema = z.object({
-  sessionDay: z.number().int().min(1).max(5),
+  /** Bei Standalone-Übungen 0 (oder ausgelassen); beim 5-Tage-Protokoll 1–5. */
+  sessionDay: z.number().int().min(0).max(5).optional().default(0),
+  mode: trainingSessionModeSchema.optional(),
   ageGroupAtTest: ageGroupSchema,
   /** Seed der Sitzung (Reproduzierbarkeit der Übungs-Zufallsanteile). */
   rngSeed: z.string().min(1),
   exercises: z.array(exerciseResultSchema),
 });
-export type TrainingSessionInput = z.infer<typeof trainingSessionInputSchema>;
+export type TrainingSessionInput = z.input<typeof trainingSessionInputSchema>;
 
 /**
  * Inkrementelles Update-Payload (AP6): Ergebnisliste und/oder Checkpoint einer

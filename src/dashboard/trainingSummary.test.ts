@@ -114,4 +114,21 @@ describe('computeTrainingSummary', () => {
     const summary = computeTrainingSummary([session]);
     expect(summary.days[0]!.highestLevelReached).toBe(3);
   });
+
+  it('ignoriert freie Standalone-Sitzungen (mode: standalone, sessionDay: 0)', () => {
+    const protocolDay1 = makeSession(1, [makeExercise({ exerciseId: 'side' })]);
+    const standaloneSession: TrainingSession = {
+      id: 'standalone-1',
+      sessionDay: 0,
+      mode: 'standalone',
+      ageGroupAtTest: 6,
+      rngSeed: 'mindcat-v1:practice:maze',
+      exercises: [makeExercise({ exerciseId: 'maze' })],
+      timestamp: new Date(2026, 0, 5),
+      status: 'completed',
+    };
+    const summary = computeTrainingSummary([protocolDay1, standaloneSession]);
+    expect(summary.days.map((d) => d.sessionDay)).toEqual([1]);
+    expect(summary.totalDaysCompleted).toBe(1);
+  });
 });
