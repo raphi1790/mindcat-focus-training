@@ -56,3 +56,43 @@ npm test            # Vitest (Scoring-, RNG-, Schema-Tests)
 npm run lint        # ESLint
 npm run build       # Produktions-Build
 ```
+
+## 7. GitLab CI/CD & Deployment
+
+Die CI/CD-Pipeline (`.gitlab-ci.yml`) führt bei jedem Push und Merge Request automatische Quality-Checks aus und deployt getaggte Releases (`vX.Y.Z`) auf Firebase Hosting.
+
+### Pipeline-Stufen
+
+1. **`test`**: Läuft auf allen Branches und Commits:
+   - `typecheck`: TypeScript-Typüberprüfung (`tsc --noEmit`)
+   - `lint`: ESLint-Prüfung (`eslint .`)
+   - `unit-tests`: Vitest Unit- und Integrationstests (`npm test`)
+   - `pilot-test`: Längsschnitt-E2E-Pilottest (`npm run pilot`)
+2. **`build`**: Erstellt die Bundles (`build:qual` für Staging/Qual, `build:prod` für Produktion) und sichert die `dist/`-Artefakte.
+3. **`deploy`**: Tag-basiertes Deployment (z. B. `v1.0.0`):
+   - `deploy:qual`: Automatisches Deployment (`on_success`) auf die Qual/Staging-Umgebung.
+   - `deploy:prod`: Manuell freizugebendes Deployment (`manual`) auf die Produktivumgebung.
+
+### Erforderliche GitLab CI/CD Variablen
+
+Unter **Settings → CI/CD → Variables** (als *Protected* und *Masked* hinterlegen):
+
+| Variable | Beschreibung |
+|---|---|
+| `FIREBASE_TOKEN` | CI-Token generiert via `firebase login:ci` |
+| `FIREBASE_PROJECT_QUAL` | Firebase Projekt-ID für die Qual/Staging-Umgebung |
+| `FIREBASE_PROJECT_PROD` | Firebase Projekt-ID für die Produktivumgebung |
+| `VITE_FIREBASE_*` | Optional: Environment-spezifische API-Keys falls nicht in `.env.*` hinterlegt |
+
+### Release- & Deployment-Ablauf
+
+1. Release taggen und pushen:
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+2. Die Pipeline führt `test` (`typecheck`, `lint`, `unit-tests`, `pilot-test`) und `build` (`build:qual`, `build:prod`) aus.
+3. Nach erfolgreichem Durchlauf wird `deploy:qual` automatisch ausgeführt.
+4. Das Release kann auf der Qual-Umgebung geprüft werden (`https://$FIREBASE_PROJECT_QUAL.web.app`).
+5. Anschließend kann `deploy:prod` in der GitLab CI-Pipeline-Übersicht per Klick manuell freigegeben werden (`https://$FIREBASE_PROJECT_PROD.web.app`).
+
