@@ -19,6 +19,7 @@ import {
   EXERCISE_COMPONENTS,
   EXERCISE_ICONS,
   EXERCISE_LABELS,
+  ExerciseCompletionModal,
   TrainingSessionRunner,
 } from './training';
 import { createExerciseProgress, type ExerciseProgressState } from './training/engine';
@@ -90,6 +91,10 @@ function DashboardShell() {
     sessionId: string;
     initialLevel: number;
   } | null>(null);
+  const [completedStandalone, setCompletedStandalone] = useState<{
+    id: ExerciseId;
+    result: ExerciseResult;
+  } | null>(null);
 
   const childId = activeChild?.id ?? null;
   const { progress, refresh: refreshProgress } = useChildrenProgress(uid, childId ? [childId] : []);
@@ -134,6 +139,7 @@ function DashboardShell() {
     if (!activeChild) return;
     // Fester Seed statt Zufalls-UUID (AP3, Fix-Plan Testrunde 1) — auch der
     // freie Einzeltest liefert damit reproduzierbare Sequenzen.
+    setCompletedStandalone(null);
     const seed = `mindcat-v1:practice:${id}`;
     try {
       const initialLevel = await getLatestStandaloneLevel(uid, activeChild.id, id);
@@ -164,6 +170,7 @@ function DashboardShell() {
   };
 
   const handleSessionCancel = () => {
+    setCompletedStandalone(null);
     setStandaloneExercise(null);
     refreshProgress();
     setView('DASHBOARD');
@@ -189,15 +196,31 @@ function DashboardShell() {
         console.error('Standalone-Sitzung konnte nicht abgeschlossen werden', err);
       }
     }
+    if (standaloneExercise) {
+      setCompletedStandalone({ id: standaloneExercise.id, result });
+    }
+  };
+
+  const handleCloseStandaloneModal = () => {
+    setCompletedStandalone(null);
     setStandaloneExercise(null);
     refreshProgress();
     setView('DASHBOARD');
+  };
+
+  const handleRestartStandalone = () => {
+    const id = completedStandalone?.id ?? standaloneExercise?.id;
+    setCompletedStandalone(null);
+    if (id) {
+      handleStandaloneExercise(id);
+    }
   };
 
   const handleErrorReset = () => {
     // Nach einem abgefangenen Renderfehler zurück ins Dashboard. Der Fortschritt
     // ist dank inkrementellem Speichern (AP6) sicher; Neu-Laden aktualisiert die
     // Anzeige. Ein erneuter Start setzt am letzten Checkpoint fort.
+    setCompletedStandalone(null);
     setStandaloneExercise(null);
     refreshProgress();
     setView('DASHBOARD');
@@ -232,14 +255,24 @@ function DashboardShell() {
             />
           )}
           {view === 'STANDALONE_EXERCISE' && standaloneExercise && StandaloneComponent && (
-            <StandaloneComponent
-              ageGroup={activeChild.ageGroup}
-              seed={standaloneExercise.seed}
-              initialState={{ ...createExerciseProgress(), level: standaloneExercise.initialLevel }}
-              onLevelUp={handleStandaloneLevelUp}
-              onComplete={(result) => void handleStandaloneExerciseComplete(result)}
-              onCancel={handleSessionCancel}
-            />
+            <>
+              <StandaloneComponent
+                ageGroup={activeChild.ageGroup}
+                seed={standaloneExercise.seed}
+                initialState={{ ...createExerciseProgress(), level: standaloneExercise.initialLevel }}
+                onLevelUp={handleStandaloneLevelUp}
+                onComplete={(result) => void handleStandaloneExerciseComplete(result)}
+                onCancel={handleSessionCancel}
+              />
+              {completedStandalone && (
+                <ExerciseCompletionModal
+                  exerciseId={completedStandalone.id}
+                  result={completedStandalone.result}
+                  onClose={handleCloseStandaloneModal}
+                  onRestart={handleRestartStandalone}
+                />
+              )}
+            </>
           )}
         </ErrorBoundary>
       </div>

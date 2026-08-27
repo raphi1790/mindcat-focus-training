@@ -2,7 +2,9 @@
 import { StrictMode, act } from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTrialRng } from '../../../platform/rng';
+import { createRng, createTrialRng } from '../../../platform/rng';
+import { createExerciseProgress } from '../../engine';
+import { catchWindowMsForLevel, lanesForLevel, pickTargetLane, travelMsForLevel } from './anticipationEngine';
 import AnticipationInvisible from './AnticipationInvisible';
 import AnticipationVisible from './AnticipationVisible';
 
@@ -71,10 +73,11 @@ function streakLabel(container: HTMLElement): string | null {
   return container.querySelector('[aria-label*="Sternen"]')?.getAttribute('aria-label') ?? null;
 }
 
-function renderExercise() {
+function renderExercise(initialLevel = 1) {
+  const initialState = initialLevel > 1 ? { ...createExerciseProgress(), level: initialLevel } : undefined;
   return render(
     <StrictMode>
-      <AnticipationVisible ageGroup={4} seed={SEED} onComplete={() => {}} onCancel={() => {}} />
+      <AnticipationVisible ageGroup={4} seed={SEED} initialState={initialState} onComplete={() => {}} onCancel={() => {}} />
     </StrictMode>,
   );
 }
@@ -140,4 +143,107 @@ describe('AnticipationInvisible — 800 ms Einstiegs-Cue vor dem Untertauchen (A
     expect(container.textContent).toContain('🦆');
   });
 });
+
+describe('Anticipation — Dynamische Spuren-Skalierung (Issue #14, Rueda 2005)', () => {
+  it('lanesForLevel liefert 5 Spuren für Level 1–3 und 7 Spuren für Level 4–7', () => {
+    expect(lanesForLevel(1)).toBe(5);
+    expect(lanesForLevel(2)).toBe(5);
+    expect(lanesForLevel(3)).toBe(5);
+    expect(lanesForLevel(4)).toBe(7);
+    expect(lanesForLevel(5)).toBe(7);
+    expect(lanesForLevel(6)).toBe(7);
+    expect(lanesForLevel(7)).toBe(7);
+  });
+
+  it('travelMsForLevel und catchWindowMsForLevel skalieren monoton mit steigendem Level', () => {
+    expect(travelMsForLevel(1)).toBe(3600);
+    expect(travelMsForLevel(7)).toBe(1500);
+    expect(catchWindowMsForLevel(1)).toBe(1400);
+    expect(catchWindowMsForLevel(7)).toBe(680);
+  });
+
+  it('pickTargetLane wählt Zielspuren im gültigen Bereich [0, lanes) ungleich exclude', () => {
+    const rng = createRng('test-seed-target-lane');
+    for (let i = 0; i < 50; i++) {
+      const target5 = pickTargetLane(rng, 5, 2);
+      expect(target5).toBeGreaterThanOrEqual(0);
+      expect(target5).toBeLessThan(5);
+      expect(target5).not.toBe(2);
+
+      const target7 = pickTargetLane(rng, 7, 3);
+      expect(target7).toBeGreaterThanOrEqual(0);
+      expect(target7).toBeLessThan(7);
+      expect(target7).not.toBe(3);
+    }
+  });
+
+  it('rendert 5 Spuren in Level 1 und 7 Spuren in Level 4', () => {
+    const { container: containerL1, unmount: unmountL1 } = renderExercise(1);
+    const lanesL1 = containerL1.querySelectorAll('.aspect-\\[3\\/1\\]');
+    expect(lanesL1.length).toBe(5);
+    unmountL1();
+
+    const { container: containerL4, unmount: unmountL4 } = renderExercise(4);
+    const lanesL4 = containerL4.querySelectorAll('.aspect-\\[3\\/1\\]');
+    expect(lanesL4.length).toBe(7);
+    unmountL4();
+  });
+});
+
+describe('Anticipation — Positionspersistenz der Katze über Trials (Issue #14)', () => {
+  it('Katze behält ihre Position über aufeinanderfolgende Trials und wird nicht auf das Zentrum zurückgesetzt', () => {
+    const { container } = renderExercise(1);
+
+    // Initial startet Katze auf Spur 2 (Mitte von 5 Spuren: 2 * 20% = 40%)
+    const catHolder = () => container.querySelector('.animate-cat-hop')?.parentElement;
+    expect(catHolder()?.style.left).toBe('40%');
+
+    // Katze um 2 Spuren nach rechts auf Spur 4 bewegen (4 * 20% = 80%)
+    press('ArrowRight');
+    press('ArrowRight');
+    expect(catHolder()?.style.left).toBe('80%');
+
+    // Trial 0 durch Zeitablauf verpassen lassen (Flash dauert 500ms)
+    act(() => {
+      vi.advanceTimersByTime(TRAVEL_MS_L1 + CATCH_WINDOW_MS_L1 + 100);
+    });
+
+    // 500ms Flash ablaufen lassen, um Trial 1 zu starten
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    // Trial 1 läuft: Counter zeigt 1/21, Katze MUSS weiterhin auf Spur 4 (80%) stehen!
+    expect(container.textContent).toContain('1 / 21');
+    expect(catHolder()?.style.left).toBe('80%');
+  });
+
+  it('erlaubt Bewegung über alle 7 Spuren (0..6) in Level 4', () => {
+    const { container } = renderExercise(4);
+    const catHolder = () => container.querySelector('.animate-cat-hop')?.parentElement;
+
+    // Startet in der Mitte von 7 Spuren (Spur 3: 3 * (100/7)%)
+    const tileW7 = 100 / 7;
+    expect(parseFloat(catHolder()?.style.left ?? '0')).toBeCloseTo(3 * tileW7, 1);
+
+    // 3x nach links auf Spur 0 bewegen
+    press('ArrowLeft');
+    press('ArrowLeft');
+    press('ArrowLeft');
+    expect(parseFloat(catHolder()?.style.left ?? '0')).toBeCloseTo(0, 1);
+
+    // Weitere Linksbewegung wird an Grenze 0 abgefangen
+    press('ArrowLeft');
+    expect(parseFloat(catHolder()?.style.left ?? '0')).toBeCloseTo(0, 1);
+
+    // 6x nach rechts auf Spur 6 bewegen
+    for (let i = 0; i < 6; i++) press('ArrowRight');
+    expect(parseFloat(catHolder()?.style.left ?? '0')).toBeCloseTo(6 * tileW7, 1);
+
+    // Weitere Rechtsbewegung wird an Grenze 6 (7-1) abgefangen
+    press('ArrowRight');
+    expect(parseFloat(catHolder()?.style.left ?? '0')).toBeCloseTo(6 * tileW7, 1);
+  });
+});
+
 
