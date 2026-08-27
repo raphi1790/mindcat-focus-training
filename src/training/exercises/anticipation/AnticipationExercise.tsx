@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDirectionalInput } from '../../../platform/input';
-import { createTrialRng, type Rng } from '../../../platform/rng';
+import { createTrialRng } from '../../../platform/rng';
 import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
+import { catchWindowMsForLevel, lanesForLevel, pickTargetLane, travelMsForLevel } from './anticipationEngine';
 
 /**
  * Anticipation (Plan §6.2, Übung 4, zwei Varianten): antizipatorische
@@ -16,30 +17,10 @@ import type { ExerciseProps } from '../../types';
  * (richtige Spur beim Auftauchen) ist in beiden Varianten identisch.
  */
 const CONFIG = EXERCISE_CONFIGS['anticipation-visible']; // identisch für beide Varianten
-const LANES = 5;
-const HOME_LANE = 2;
 const TICK_MS = 100;
 const FLASH_MS = 500;
 
 type Phase = 'approaching' | 'catchable';
-
-function travelMsForLevel(level: number): number {
-  return Math.max(1500, 3600 - (level - 1) * 350);
-}
-
-function catchWindowMsForLevel(level: number): number {
-  return Math.max(600, 1400 - (level - 1) * 120);
-}
-
-function pickTargetLane(rng: Rng, exclude: number): number {
-  let lane: number;
-  let guard = 0;
-  do {
-    lane = rng.int(0, LANES);
-    guard += 1;
-  } while (lane === exclude && guard < 20);
-  return lane;
-}
 
 interface AnticipationExerciseProps extends ExerciseProps {
   visible: boolean;
@@ -49,7 +30,8 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
   const exerciseId = visible ? 'anticipation-visible' : 'anticipation-invisible';
   const { state, recordTrial } = useExerciseEngine(exerciseId, CONFIG, onComplete, { initialState, onLevelUp });
   const [trialId, setTrialId] = useState(0);
-  const [lane, setLane] = useState(HOME_LANE);
+  const initialLanes = lanesForLevel(initialState?.level ?? 1);
+  const [lane, setLane] = useState(() => Math.floor(initialLanes / 2));
   const [targetLane, setTargetLane] = useState(0);
   const [phase, setPhase] = useState<Phase>('approaching');
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -86,12 +68,14 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
 
     const setupTrial = () => {
       gateRef.current.reset();
-      const target = pickTargetLane(trialRng, HOME_LANE);
-      phaseRef.current = 'approaching';
-      laneRef.current = HOME_LANE;
-      setLane(HOME_LANE);
+      const currentLanes = lanesForLevel(state.level);
+      const retainedCat = Math.min(Math.max(laneRef.current, 0), currentLanes - 1);
+      laneRef.current = retainedCat;
+      setLane(retainedCat);
+      const target = pickTargetLane(trialRng, currentLanes, retainedCat);
       targetLaneRef.current = target;
       setTargetLane(target);
+      phaseRef.current = 'approaching';
       setPhase('approaching');
       elapsedRef.current = 0;
       setElapsedMs(0);
@@ -128,14 +112,15 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
   const handleMove = useCallback(
     ({ dx }: { dx: number; dy: number }) => {
       if (flash !== null || dx === 0) return;
-      const next = Math.min(Math.max(laneRef.current + dx, 0), LANES - 1);
+      const currentLanes = lanesForLevel(state.level);
+      const next = Math.min(Math.max(laneRef.current + dx, 0), currentLanes - 1);
       laneRef.current = next;
       setLane(next);
       if (phaseRef.current === 'catchable' && next === targetLaneRef.current) {
         endTrialRef.current(true);
       }
     },
-    [flash],
+    [flash, state.level],
   );
 
   useDirectionalInput(handleMove, { enabled: flash === null && !state.done, repeatDelayMs: 180 });
@@ -149,6 +134,7 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
     return () => clearTimeout(timeout);
   }, [flash]);
 
+  const lanes = lanesForLevel(state.level);
   const travelMs = travelMsForLevel(state.level);
   const progress = Math.min(1, elapsedMs / travelMs);
   // Ente nähert sich von links außerhalb des Feldes (-1) der Zielspur an.
@@ -156,7 +142,7 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
 
   return (
     <GridWorld
-      cols={LANES}
+      cols={lanes}
       rows={1}
       tileAt={(x) => (phase === 'catchable' && x === targetLane ? 'target' : 'path')}
       catPos={{ x: lane, y: 0 }}
@@ -165,8 +151,8 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
       streak={{ current: state.streak, target: CONFIG.advanceStreak }}
       counter={`${state.totalTrials} / ${CONFIG.minTrials}`}
       aboveGrid={
-        <div className="mt-16 w-[90vw] max-w-[600px] grid gap-2" style={{ gridTemplateColumns: `repeat(${LANES}, 1fr)` }}>
-          {Array.from({ length: LANES }, (_, i) => {
+        <div className="mt-16 w-[90vw] max-w-[600px] grid gap-2" style={{ gridTemplateColumns: `repeat(${lanes}, 1fr)` }}>
+          {Array.from({ length: lanes }, (_, i) => {
             const duckApproaching = visible
               ? phase === 'approaching' && markerLane === i
               : phase === 'approaching' && elapsedMs < 800 && targetLane === i;

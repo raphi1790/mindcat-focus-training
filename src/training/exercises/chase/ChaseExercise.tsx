@@ -5,6 +5,7 @@ import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
+import { checkChaseCollision, type Pos } from './collision';
 
 /**
  * Chase (Plan §6.2, Übung 2): Verfolgung/Sustained Attention. a=7, b=21, c=3.
@@ -16,8 +17,6 @@ const CONFIG = EXERCISE_CONFIGS.chase;
 const GRID_SIZE = 8;
 const FLASH_MS = 500;
 const TICK_MS = 100;
-
-type Pos = { x: number; y: number };
 
 function centerPos(): Pos {
   return { x: Math.floor(GRID_SIZE / 2), y: Math.floor(GRID_SIZE / 2) };
@@ -75,14 +74,14 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
   // (React StrictMode ruft Updater-Funktionen im Dev-Modus doppelt auf —
   // Seiteneffekte wie `endTrial` dürfen deshalb nie darin stehen).
   const catPosRef = useRef(catPos);
+  const prevCatPosRef = useRef(catPos);
   const targetPosRef = useRef(targetPos);
-  useEffect(() => {
-    targetPosRef.current = targetPos;
-  }, [targetPos]);
+  const prevTargetPosRef = useRef(targetPos);
   const remainingRef = useRef(remainingMs);
   const gateRef = useRef(createTrialGate());
 
   const updateCatPos = useCallback((pos: Pos) => {
+    prevCatPosRef.current = catPosRef.current;
     catPosRef.current = pos;
     setCatPos(pos);
   }, []);
@@ -116,8 +115,13 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
     const setupTrial = () => {
       gateRef.current.reset();
       const cat = centerPos();
-      updateCatPos(cat);
-      setTargetPos(randomPos(trialRng, cat));
+      prevCatPosRef.current = cat;
+      catPosRef.current = cat;
+      setCatPos(cat);
+      const target = randomPos(trialRng, cat);
+      prevTargetPosRef.current = target;
+      targetPosRef.current = target;
+      setTargetPos(target);
       remainingRef.current = timeLimitForLevel(state.level);
       setRemainingMs(remainingRef.current);
     };
@@ -125,7 +129,17 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
 
     const stepMs = stepIntervalForLevel(state.level);
     const stepInterval = setInterval(() => {
-      setTargetPos((prev) => stepRandomly(trialRng, prev));
+      const prev = targetPosRef.current;
+      const next = stepRandomly(trialRng, prev);
+      prevTargetPosRef.current = prev;
+      targetPosRef.current = next;
+      setTargetPos(next);
+
+      const cat = catPosRef.current;
+      const prevCat = prevCatPosRef.current;
+      if (checkChaseCollision(prevCat, cat, prev, next)) {
+        endTrialRef.current(true);
+      }
     }, stepMs);
 
     const tickInterval = setInterval(() => {
@@ -143,7 +157,7 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
       clearInterval(stepInterval);
       clearInterval(tickInterval);
     };
-  }, [trialId, state.level, state.done, state.totalTrials, seed, updateCatPos]);
+  }, [trialId, state.level, state.done, state.totalTrials, seed]);
 
   const handleMove = useCallback(
     ({ dx, dy }: { dx: number; dy: number }) => {
@@ -156,14 +170,8 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
       updateCatPos(next);
 
       const target = targetPosRef.current;
-      const isDiagonal = dx !== 0 && dy !== 0;
-      const caughtDirectly = next.x === target.x && next.y === target.y;
-      const caughtIntermediate =
-        isDiagonal &&
-        ((prev.x + dx === target.x && prev.y === target.y) ||
-          (prev.x === target.x && prev.y + dy === target.y));
-
-      if (caughtDirectly || caughtIntermediate) {
+      const prevTarget = prevTargetPosRef.current;
+      if (checkChaseCollision(prev, next, prevTarget, target)) {
         endTrialRef.current(true);
       }
     },
