@@ -22,7 +22,7 @@ export default function ExerciseLevelGrid({ overview }: ExerciseLevelGridProps) 
             </span>
             <div>
               <p className="text-xs uppercase font-bold tracking-wider text-purple-700">
-                Aktiver Spielstand gespeichert (Tag {activeCheckpoint.sessionDay})
+                Aktiver Spielstand gespeichert ({activeCheckpoint.sessionDay > 0 ? `Tag ${activeCheckpoint.sessionDay}` : 'Einzelübung'})
               </p>
               <p className="text-sm font-semibold text-slate-800">
                 {activeCheckpoint.exerciseIcon} {activeCheckpoint.exerciseLabel} —{' '}
@@ -136,7 +136,9 @@ export default function ExerciseLevelGrid({ overview }: ExerciseLevelGridProps) 
           e.totalTrials,
           e.totalErrors + e.totalMissed,
           e.activeCheckpoint
-            ? `In Bearbeitung (Tag ${e.activeCheckpoint.sessionDay})`
+            ? e.activeCheckpoint.sessionDay > 0
+              ? `In Bearbeitung (Tag ${e.activeCheckpoint.sessionDay})`
+              : 'In Bearbeitung (Einzelübung)'
             : e.isCompletedMax
               ? 'Maximalstufe erreicht'
               : e.hasPlayed

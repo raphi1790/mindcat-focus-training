@@ -1,4 +1,4 @@
-import type { AssessmentPhase, AssessmentQuality, TrainingSessionStatus } from './schema';
+import type { AssessmentPhase, AssessmentQuality, TrainingSessionMode, TrainingSessionStatus } from './schema';
 
 /**
  * Studienablauf pro Kind: Baseline-ANT → 5 Trainingstage → Post-ANT.
@@ -13,7 +13,9 @@ export interface ProgressAssessment {
 }
 
 export interface ProgressSession {
-  sessionDay: number;
+  sessionDay?: number;
+  /** Modus: Standard-Protokoll vs. freie Einzelübung (Issue #15). */
+  mode?: TrainingSessionMode;
   /**
    * Lebenszyklus (AP6). Fehlt bei Alt-Daten → wie `completed` behandelt.
    * Laufende (`in-progress`) Sitzungen zählen nicht als abgeschlossener Tag.
@@ -45,10 +47,16 @@ export function computeChildProgress(
   const baselineDone = assessments.some((a) => a.phase === 'baseline' && !a.quality.excluded);
   const postDone = assessments.some((a) => a.phase === 'post' && !a.quality.excluded);
 
-  // Nur echt abgeschlossene Tage zählen — eine laufende (in-progress) Sitzung
-  // ist ein noch offener, fortsetzbarer Tag (AP6), kein erledigter.
+  // Nur echt abgeschlossene Protokolltage zählen — laufende (in-progress) Sitzungen
+  // und freie Standalone-Übungen (Issue #15) zählen nicht als abgeschlossener Studientag.
   const completedDays = sessions.reduce(
-    (max, s) => (s.status !== 'in-progress' && s.sessionDay > max ? s.sessionDay : max),
+    (max, s) =>
+      s.status !== 'in-progress' &&
+      s.mode !== 'standalone' &&
+      typeof s.sessionDay === 'number' &&
+      s.sessionDay > max
+        ? s.sessionDay
+        : max,
     0,
   );
   const trainingDone = completedDays >= TOTAL_TRAINING_DAYS;

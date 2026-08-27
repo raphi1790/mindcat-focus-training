@@ -105,4 +105,19 @@ describe('computeChildProgress', () => {
     const p = computeChildProgress([{ phase: 'post', quality: ok }], []);
     expect(p.nextStep).toBe('baseline');
   });
+
+  it('Standalone-Sitzungen (mode: standalone oder sessionDay: 0) beeinflussen den Studienfortschritt nicht', () => {
+    const p = computeChildProgress(
+      [{ phase: 'baseline', quality: ok }],
+      [
+        { sessionDay: 0, mode: 'standalone', status: 'completed' },
+        { sessionDay: 0, mode: 'standalone', status: 'in-progress' },
+        { sessionDay: 1, mode: 'training', status: 'completed' },
+        { sessionDay: 0, mode: 'standalone', status: 'completed' },
+      ],
+    );
+    expect(p.completedDays).toBe(1);
+    expect(p.nextSessionDay).toBe(2);
+    expect(p.nextStep).toBe('training');
+  });
 });

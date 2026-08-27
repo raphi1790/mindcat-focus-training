@@ -169,10 +169,40 @@ describe('trainingSessionInputSchema', () => {
     ).not.toThrow();
   });
 
-  it('lehnt sessionDay außerhalb 1–5 und unbekannte Übungs-IDs ab', () => {
+  it('akzeptiert eine Standalone-Sitzung mit sessionDay: 0 und mode: standalone', () => {
+    const parsed = trainingSessionInputSchema.parse({
+      sessionDay: 0,
+      mode: 'standalone',
+      ageGroupAtTest: 4,
+      rngSeed: 'mindcat-v1:practice:side',
+      exercises: [],
+    });
+    expect(parsed.sessionDay).toBe(0);
+    expect(parsed.mode).toBe('standalone');
+  });
+
+  it('lässt mode optional und setzt Default-Wert für sessionDay (0)', () => {
+    const parsed = trainingSessionInputSchema.parse({
+      ageGroupAtTest: 6,
+      rngSeed: 'seed',
+      exercises: [],
+    });
+    expect(parsed.mode).toBeUndefined();
+    expect(parsed.sessionDay).toBe(0);
+  });
+
+  it('lehnt sessionDay außerhalb 0–5 und unbekannte Übungs-IDs ab', () => {
     expect(() =>
       trainingSessionInputSchema.parse({
         sessionDay: 6,
+        ageGroupAtTest: 6,
+        rngSeed: 's',
+        exercises: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      trainingSessionInputSchema.parse({
+        sessionDay: -1,
         ageGroupAtTest: 6,
         rngSeed: 's',
         exercises: [],
