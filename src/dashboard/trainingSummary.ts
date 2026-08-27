@@ -51,10 +51,12 @@ function highestLevelOf(exercise: TrainingSession['exercises'][number]): number 
 }
 
 export function computeTrainingSummary(sessions: readonly TrainingSession[]): TrainingSummary {
-  // Laufende (in-progress) Sitzungen sind noch kein Datenpunkt (AP6): ihre
-  // abgeschlossenen Übungen tauchen erst auf, wenn der Tag als `completed`
-  // gespeichert ist (dasselbe Dokument, dann vollständig).
-  const completedSessions = sessions.filter((s) => s.status !== 'in-progress');
+  // Laufende (in-progress) Sitzungen und Standalone-Einzelübungen (Issue #15)
+  // zählen nicht zum 5-Tage-Protokollverlauf: nur abgeschlossene Trainingstage
+  // (sessionDay > 0) werden aggregiert.
+  const completedSessions = sessions.filter(
+    (s) => s.status !== 'in-progress' && s.mode !== 'standalone' && typeof s.sessionDay === 'number' && s.sessionDay > 0,
+  );
 
   const byDay = new Map<number, TrainingSession[]>();
   for (const session of completedSessions) {

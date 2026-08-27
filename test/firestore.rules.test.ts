@@ -100,7 +100,7 @@ describe('firestore.rules — Assessments (append-only)', () => {
     );
   });
 
-  it('Assessments sind unveränderlich: Update und Delete verboten (auch für den Besitzer)', async () => {
+  it('Assessments sind unveränderlich (Update verboten); Besitzer darf für Reset löschen', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(
         doc(ctx.firestore(), `users/${ALICE}/children/${CHILD}/assessments/a1`),
@@ -110,10 +110,10 @@ describe('firestore.rules — Assessments (append-only)', () => {
     const db = asUser(ALICE);
     const ref = doc(db, `users/${ALICE}/children/${CHILD}/assessments/a1`);
     await assertFails(setDoc(ref, { ...validAssessment, rngSeed: 'tampered' }));
-    await assertFails(deleteDoc(ref));
+    await assertSucceeds(deleteDoc(ref));
   });
 
-  it('Fremder darf Assessments nicht lesen', async () => {
+  it('Fremder darf Assessments nicht lesen oder löschen', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(
         doc(ctx.firestore(), `users/${ALICE}/children/${CHILD}/assessments/a1`),
@@ -121,7 +121,9 @@ describe('firestore.rules — Assessments (append-only)', () => {
       );
     });
     const bob = asUser(BOB);
-    await assertFails(getDoc(doc(bob, `users/${ALICE}/children/${CHILD}/assessments/a1`)));
+    const ref = doc(bob, `users/${ALICE}/children/${CHILD}/assessments/a1`);
+    await assertFails(getDoc(ref));
+    await assertFails(deleteDoc(ref));
   });
 });
 
@@ -177,10 +179,17 @@ describe('firestore.rules — TrainingSessions (inkrementell, dann unveränderli
     await assertFails(updateDoc(ref, { sessionDay: 2 }));
   });
 
-  it('Löschen ist immer verboten — auch für laufende Sitzungen', async () => {
+  it('Besitzer darf Trainingssitzungen löschen (Spielstand-Reset)', async () => {
     await seed(`users/${ALICE}/children/${CHILD}/trainingSessions/t1`, inProgress);
     const db = asUser(ALICE);
     const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
+    await assertSucceeds(deleteDoc(ref));
+  });
+
+  it('Fremder darf Trainingssitzungen nicht löschen', async () => {
+    await seed(`users/${ALICE}/children/${CHILD}/trainingSessions/t1`, inProgress);
+    const bob = asUser(BOB);
+    const ref = doc(bob, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
     await assertFails(deleteDoc(ref));
   });
 });

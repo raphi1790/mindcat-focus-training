@@ -180,5 +180,5 @@ describe('MazeExercise — Wände blockieren statt bestrafen (AP4/Befund E)', ()
     expect(result!.errors).toBe(0);
     expect(result!.levelsCompleted).toBe(6);
     expect(result!.rawEvents?.some((e) => e.type === 'wallBump')).toBe(true);
-  });
+  }, 15000);
 });

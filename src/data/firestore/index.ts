@@ -3,7 +3,11 @@ export { addAssessment, listAssessments } from './assessmentsRepo';
 export {
   completeTrainingSession,
   findInProgressSession,
+  findInProgressStandaloneSession,
+  getLatestStandaloneLevel,
   listTrainingSessions,
+  resetChildProgress,
+  startStandaloneSession,
   startTrainingSession,
   updateTrainingSessionProgress,
 } from './trainingSessionsRepo';

@@ -1,4 +1,5 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { resetChildProgress } from '../data/firestore';
 import type { Child } from '../data/schema';
 import EffectComparisonChart from './charts/EffectComparisonChart';
 import ExerciseLevelGrid from './charts/ExerciseLevelGrid';
@@ -24,16 +25,36 @@ import { useGroupComparisonData } from './useGroupComparisonData';
 interface ChildDashboardProps {
   uid: string;
   child: Child;
+  onReset?: () => void;
 }
 
-export default function ChildDashboard({ uid, child }: ChildDashboardProps) {
-  const { loading, error, assessments, sessions, effectSummary, trainingSummary, histogram } =
+export default function ChildDashboard({ uid, child, onReset }: ChildDashboardProps) {
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  const { loading, error, assessments, sessions, effectSummary, trainingSummary, histogram, reload } =
     useChildDashboardData(uid, child.id);
   const group = useGroupComparisonData(uid);
   const exerciseOverview = useMemo(
     () => computeExerciseLevelOverview(sessions, child.ageGroup),
     [sessions, child.ageGroup],
   );
+
+  const handleConfirmReset = async () => {
+    setResetting(true);
+    setResetError(null);
+    try {
+      await resetChildProgress(uid, child.id);
+      await reload();
+      onReset?.();
+      setShowResetModal(false);
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : 'Spielstand konnte nicht zurückgesetzt werden.');
+    } finally {
+      setResetting(false);
+    }
+  };
 
   if (loading) {
     return <p className="text-slate-400">Auswertung wird geladen…</p>;
@@ -162,6 +183,85 @@ export default function ChildDashboard({ uid, child }: ChildDashboardProps) {
           <ExportButton onClick={exportFullJson} label="Alles (JSON)" primary />
         </div>
       </Section>
+
+      <Section title="Verwaltung & Spielstand">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-red-50/50 border border-red-100">
+          <div>
+            <h4 className="text-sm font-bold text-red-900">Spielstand zurücksetzen</h4>
+            <p className="text-xs text-red-700 mt-0.5">
+              Löscht alle gespeicherten Trainingstage und Übungsfortschritte für {child.displayName}.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setResetError(null);
+              setShowResetModal(true);
+            }}
+            className="px-4 py-2.5 rounded-xl text-sm font-bold bg-red-600 hover:bg-red-700 text-white transition-colors shrink-0 shadow-xs flex items-center justify-center gap-2"
+          >
+            <span>⚠️</span>
+            <span>Spielstand zurücksetzen</span>
+          </button>
+        </div>
+      </Section>
+
+      {showResetModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reset-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs"
+        >
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-100 space-y-4">
+            <div className="flex items-center gap-3 text-red-600">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-xl shrink-0">
+                ⚠️
+              </div>
+              <h3 id="reset-modal-title" className="text-lg font-bold text-slate-800">
+                Spielstand zurücksetzen?
+              </h3>
+            </div>
+
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Möchtest du den gesamten Trainingsfortschritt für <strong>{child.displayName}</strong> wirklich zurücksetzen?
+              Alle bisherigen Trainingstage und Übungsstände werden unwiderruflich gelöscht. Das Kind startet wieder bei Tag 1.
+            </p>
+
+            {resetError && (
+              <div className="p-3 rounded-lg bg-red-50 text-red-700 text-xs font-medium border border-red-200">
+                {resetError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={resetting}
+                onClick={() => setShowResetModal(false)}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
+              >
+                Abbrechen
+              </button>
+              <button
+                type="button"
+                disabled={resetting}
+                onClick={() => void handleConfirmReset()}
+                className="px-4 py-2 rounded-xl text-sm font-bold bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {resetting ? (
+                  <>
+                    <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Wird zurückgesetzt…</span>
+                  </>
+                ) : (
+                  <span>Ja, Spielstand zurücksetzen</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
