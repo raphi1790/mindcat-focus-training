@@ -1,0 +1,104 @@
+default:
+  image: node:20-alpine
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+
+stages:
+  - test
+  - build
+  - deploy
+
+# ==========================================
+# STAGE: TEST (All commits & Merge Requests)
+# ==========================================
+
+typecheck:
+  stage: test
+  script:
+    - npm run typecheck
+
+lint:
+  stage: test
+  script:
+    - npm run lint
+
+unit-tests:
+  stage: test
+  script:
+    - npm test
+
+pilot-test:
+  stage: test
+  script:
+    - npm run pilot
+
+# ==========================================
+# STAGE: BUILD
+# ==========================================
+
+build:qual:
+  stage: build
+  script:
+    - npm run build:qual
+  artifacts:
+    name: "dist-qual-$CI_COMMIT_REF_SLUG"
+    paths:
+      - dist/
+    expire_in: 7 days
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == "main"
+
+build:prod:
+  stage: build
+  script:
+    - npm run build:prod
+  artifacts:
+    name: "dist-prod-$CI_COMMIT_REF_SLUG"
+    paths:
+      - dist/
+    expire_in: 30 days
+  rules:
+    - if: $CI_COMMIT_TAG
+
+# ==========================================
+# STAGE: DEPLOY (Git Tags only)
+# ==========================================
+
+deploy:qual:
+  stage: deploy
+  dependencies:
+    - build:qual
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: on_success
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+    - npm install -g firebase-tools
+  script:
+    - firebase deploy --only hosting --project "$FIREBASE_PROJECT_QUAL" --token "$FIREBASE_TOKEN"
+  environment:
+    name: qual
+    url: https://$FIREBASE_PROJECT_QUAL.web.app
+
+deploy:prod:
+  stage: deploy
+  dependencies:
+    - build:prod
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+    - npm install -g firebase-tools
+  script:
+    - firebase deploy --only hosting --project "$FIREBASE_PROJECT_PROD" --token "$FIREBASE_TOKEN"
+  environment:
+    name: production
+    url: https://$FIREBASE_PROJECT_PROD.web.app
