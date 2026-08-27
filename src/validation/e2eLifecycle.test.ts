@@ -587,7 +587,9 @@ describe('E2E Lifecycle — Firestore Security Rules & Mandantentrennung', () =>
 
     const assessmentRef = doc(db, 'users', ALICE, 'children', childId, 'assessments', baselineId);
     await assertFails(updateDoc(assessmentRef, { phase: 'post' }));
-    await assertFails(deleteDoc(assessmentRef));
+    // Fremder darf Assessment nicht löschen
+    const bob = asUser(BOB);
+    await assertFails(deleteDoc(doc(bob, 'users', ALICE, 'children', childId, 'assessments', baselineId)));
 
     // 2. TrainingSession: Update während in-progress erlaubt, nach completed verboten
     const sessionId = await startTrainingSessionDoc(db, ALICE, childId, {
@@ -602,15 +604,17 @@ describe('E2E Lifecycle — Firestore Security Rules & Mandantentrennung', () =>
     // In-Progress Update erlaubt
     await assertSucceeds(updateDoc(sessionRef, { exercises: [] }));
 
-    // Löschen auch während in-progress verboten
-    await assertFails(deleteDoc(sessionRef));
+    // Fremder darf nicht löschen
+    await assertFails(deleteDoc(doc(bob, 'users', ALICE, 'children', childId, 'trainingSessions', sessionId)));
 
     // Sitzung abschließen
     await completeTrainingSessionDoc(db, ALICE, childId, sessionId, []);
 
     // Nachträgliches Ändern nach completed verboten
     await assertFails(updateDoc(sessionRef, { sessionDay: 2 }));
-    await assertFails(deleteDoc(sessionRef));
+    // Fremder darf auch nach completed nicht löschen; Besitzer darf löschen (Reset)
+    await assertFails(deleteDoc(doc(bob, 'users', ALICE, 'children', childId, 'trainingSessions', sessionId)));
+    await assertSucceeds(deleteDoc(sessionRef));
   });
 });
 
