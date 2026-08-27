@@ -4,6 +4,7 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTrialRng } from '../../../platform/rng';
 import { createExerciseProgress } from '../../engine/exerciseProgress';
+import { type Pos } from './collision';
 import ChaseExercise from './ChaseExercise';
 
 /**
@@ -44,7 +45,7 @@ afterEach(() => {
 
 // Spiegelt GRID_SIZE/centerPos aus ChaseExercise.tsx.
 const GRID_SIZE = 8;
-const CENTER = { x: Math.floor(GRID_SIZE / 2), y: Math.floor(GRID_SIZE / 2) };
+const CENTER: Pos = { x: Math.floor(GRID_SIZE / 2), y: Math.floor(GRID_SIZE / 2) };
 /**
  * Seed bewusst so gewählt, dass der Schirm direkt neben der Katze startet:
  * Ein einziger Zug genügt, der Fang passiert also lange vor dem ersten
@@ -53,9 +54,9 @@ const CENTER = { x: Math.floor(GRID_SIZE / 2), y: Math.floor(GRID_SIZE / 2) };
 const SEED = 'ap1-chase-0';
 
 /** Spiegelt randomPos() aus ChaseExercise.tsx für Trial 0. */
-function targetPosForTrial0(seed: string): { x: number; y: number } {
+function targetPosForTrial0(seed: string): Pos {
   const rng = createTrialRng(seed, 0);
-  let pos: { x: number; y: number };
+  let pos: Pos;
   let guard = 0;
   do {
     pos = { x: rng.int(0, GRID_SIZE), y: rng.int(0, GRID_SIZE) };
@@ -85,6 +86,7 @@ function streakLabel(container: HTMLElement): string | null {
   return container.querySelector('[aria-label*="Sternen"]')?.getAttribute('aria-label') ?? null;
 }
 
+
 describe('ChaseExercise — kein Doppelzählen unter StrictMode (AP1/Befund A)', () => {
   it('erster richtiger Fang füllt genau 1 Stern (nicht 2)', () => {
     const target = targetPosForTrial0(SEED);
@@ -106,14 +108,70 @@ describe('ChaseExercise — kein Doppelzählen unter StrictMode (AP1/Befund A)',
   });
 });
 
-describe('ChaseExercise — AP2 (8-Wege-Diagonal-Treffererkennung & HUD-Visualisierung)', () => {
-  function findSeedForTarget(predicate: (pos: { x: number; y: number }) => boolean): string {
+describe('ChaseExercise — Schirm-Schritt-Kollision & AP2', () => {
+  function findSeedForTarget(predicate: (pos: Pos) => boolean): string {
     for (let i = 0; i < 1000; i++) {
       const s = `seed-ap2-${i}`;
       if (predicate(targetPosForTrial0(s))) return s;
     }
     throw new Error('Kein passender Seed gefunden');
   }
+
+  function findSeedWhereTargetStepsOntoCat(): string {
+    const stepOptions = [
+      { x: 0, y: -1 },
+      { x: 0, y: 1 },
+      { x: -1, y: 0 },
+      { x: 1, y: 0 },
+      { x: -1, y: -1 },
+      { x: 1, y: -1 },
+      { x: -1, y: 1 },
+      { x: 1, y: 1 },
+      { x: 0, y: 0 },
+    ];
+
+    for (let i = 0; i < 2000; i++) {
+      const s = `seed-step-cat-${i}`;
+      const trialRng = createTrialRng(s, 0);
+
+      // Reproduziere setupTrial:
+      let pos: Pos;
+      let guard = 0;
+      do {
+        pos = { x: trialRng.int(0, GRID_SIZE), y: trialRng.int(0, GRID_SIZE) };
+        guard += 1;
+      } while (pos.x === CENTER.x && pos.y === CENTER.y && guard < 20);
+
+      // Reproduziere ersten stepRandomly im stepInterval:
+      const choice = trialRng.pick(stepOptions);
+      const nextTarget = {
+        x: Math.min(Math.max(pos.x + choice.x, 0), GRID_SIZE - 1),
+        y: Math.min(Math.max(pos.y + choice.y, 0), GRID_SIZE - 1),
+      };
+
+      if (nextTarget.x === CENTER.x && nextTarget.y === CENTER.y) {
+        return s;
+      }
+    }
+    throw new Error('Kein passender Seed für Schirmschritt auf Katze gefunden');
+  }
+
+  it('erkennt Fang wenn Schirm auf die stehende Katze zieht (stepInterval Collision Check)', () => {
+    const seed = findSeedWhereTargetStepsOntoCat();
+
+    const { container } = render(
+      <ChaseExercise ageGroup={4} seed={seed} onComplete={() => {}} onCancel={() => {}} />,
+    );
+
+    expect(streakLabel(container)).toBe('0 von 3 Sternen bis zum nächsten Level');
+
+    // Keine Tastatureingabe — wir warten einfach auf den ersten Schirm-Schritt (700 ms bei Level 1)
+    act(() => {
+      vi.advanceTimersByTime(700);
+    });
+
+    expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
+  });
 
   it('fängt den Schirm auf einem Zwischenfeld bei einem Diagonalschritt', () => {
     // Schirm steht auf (5, 4) — direkt rechts von der Katze (4, 4)
@@ -146,4 +204,5 @@ describe('ChaseExercise — AP2 (8-Wege-Diagonal-Treffererkennung & HUD-Visualis
     expect(container.textContent).toContain('⚡');
   });
 });
+
 
