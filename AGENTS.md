@@ -2,7 +2,9 @@
 
 Reimplementierung des Aufmerksamkeitstrainings für Kinder nach **Rueda et al. (2005, PNAS)** — wissenschaftlich belastbar, kindgerecht, mit Firestore-Persistenz.
 
-Der maßgebliche Arbeitsplan ist [docs/IMPLEMENTATION_PLAN.md](file:///Users/raphscho/Documents/Projects/mindcat-focus-training/docs/IMPLEMENTATION_PLAN.md). Vor jeder Implementierungsarbeit lesen; er enthält Zielarchitektur, Datenmodell, Übungsparameter und den Phasenplan. Bei Widerspruch zwischen bestehendem Code und Plan gilt der Plan.
+Verbindliche Architektur- und Spezifikationsvorgaben sind in den [Architecture Decision Records (ADRs)](file:///Users/raphscho/Documents/Projects/mindcat-focus-training/docs/adr/) dokumentiert (insbesondere [ADR 0004](file:///Users/raphscho/Documents/Projects/mindcat-focus-training/docs/adr/0004-scientific-rueda-exercise-and-ant-specifications.md) für Übungsparameter und Child ANT). 
+
+**Die Aufgabensteuerung erfolgt ausschließlich über GitHub Issues.** Jede Implementierung, jeder Bugfix und jedes Feature wird über ein zugehöriges GitHub Issue abgewickelt.
 
 ---
 
@@ -24,17 +26,17 @@ Daraus folgt konkret:
 - Seeded RNG für alle Trial-Sequenzen; Seed wird persistiert (Reproduzierbarkeit).
 - ANT-Scoring: Median-RT korrekter Trials je Bedingung; Exclusion bei Fehlerrate > 40 %.
 - Vollständige Roh-Trial-Logs speichern (Reanalyse-Fähigkeit).
-- Level-Advancement der Übungen exakt nach den a/b/c-Parametern aus dem Plan (§6.2).
+- Level-Advancement der Übungen exakt nach den a/b/c-Parametern aus [ADR 0004](file:///Users/raphscho/Documents/Projects/mindcat-focus-training/docs/adr/0004-scientific-rueda-exercise-and-ant-specifications.md).
 
 ---
 
 ## 3. Technische & Architektonische Konventionen
 
 * **[Coding Standards](file:///Users/raphscho/Documents/Projects/mindcat-focus-training/docs/standards/coding-standards.md)**: Grenzen (< 1000 Zeilen/Datei, < 300 Zeilen/Funktion, max. 3 Nesting-Ebenen, Clean Code & Pragmatic Engineer).
-* **[Architecture Decision Records](file:///Users/raphscho/Documents/Projects/mindcat-focus-training/docs/adr/)**: Dokumentierte Architekturentscheidungen (MADR für Firebase/Firestore, React 19/Vite Stack etc.).
+* **[Architecture Decision Records](file:///Users/raphscho/Documents/Projects/mindcat-focus-training/docs/adr/)**: Dokumentierte Architekturentscheidungen (MADR für Firebase/Firestore, React 19/Vite Stack, Rueda-Spezifikation etc.).
 * **TypeScript**: Neuer Code wird ausnahmslos in TypeScript geschrieben; bestehende JSX-Dateien werden bei Berührung migriert.
 * **Zod-Validierung an der Firestore-Grenze**: Jedes gelesene/geschriebene Dokument läuft durch ein Schema in `src/data/schema/`.
-* **Datenmodell**: `users/{uid}/children/{childId}/{assessments,trainingSessions}` (Details im Plan §3). Die alte flache `testResults`-Collection ist deprecated.
+* **Datenmodell**: `users/{uid}/children/{childId}/{assessments,trainingSessions}` ([ADR 0002](file:///Users/raphscho/Documents/Projects/mindcat-focus-training/docs/adr/0002-firebase-and-firestore-persistence.md)). Die alte flache `testResults`-Collection ist deprecated.
 * **Zeitstempel**: Firestore `serverTimestamp()`; client-seitige RTs zusätzlich via `performance.now()`.
 * **Vitest-Testpflicht**: Wissenschaftlich und datentechnisch relevante Logik (Scoring, Median, Exclusion, Advancement, RNG-Determinismus) muss Unit-Tests besitzen.
 * **Eingabe**: Ausschließlich über die Abstraktion in `src/platform/input/` (nicht direkt `keydown`/Gamepad-API in Komponenten).
@@ -60,22 +62,24 @@ Firebase-Konfiguration über `VITE_FIREBASE_*`-Variablen in `.env` (Vorlage: `.e
 
 ---
 
-## 5. Developer Agent Workflow (Schritt-für-Schritt)
+## 5. GitHub Issues & Agent Workflow (Schritt-für-Schritt)
+
+Alle Aufgaben werden über GitHub Issues gesteuert. Damit mehrere Entwickler bzw. Agenten nicht am selben Ticket arbeiten und Konflikte vermieden werden, ist der Ablauf strikt getaktet:
 
 ### Schritt 1: Arbeitspaket (GitHub Issue) holen
-Hole ein freies GitHub Issue (Label: `ready-for-agent`) und beanspruche es:
+Wähle ein freies Issue mit dem Label `ready-for-agent` aus (`gh issue list --label ready-for-agent`) und beanspruche es:
 
 ```bash
 npm run agent:take <ISSUE_ID>
 ```
-* **Was passiert automatisch**:
-  * Das Issue wird mit dem Label `agent:in-progress` getaggt (andere Agenten wissen, dass es vergeben ist).
+* **Was automatisch passiert**:
+  * Das Issue wird mit dem Label `agent:in-progress` getaggt und `ready-for-agent` wird entfernt (sperrt das Ticket für andere Agenten).
   * Ein isolierter Git Worktree wird unter `.worktrees/issue-<ISSUE_ID>` erstellt und der Branch `feat/issue-<ISSUE_ID>` ausgecheckt.
 
 ---
 
 ### Schritt 2: Im Git Worktree entwickeln
-Wechsle in das erstellte Worktree-Verzeichnis und löse das Ticket:
+Wechsle in das erstellte Worktree-Verzeichnis und bearbeite das Ticket:
 
 ```bash
 cd .worktrees/issue-<ISSUE_ID>
@@ -102,18 +106,19 @@ Wenn alle Tests und Linters grün sind, schließe das Ticket ab:
 ```bash
 npm run agent:finish <ISSUE_ID>
 ```
-* **Was passiert automatisch**:
+* **Was automatisch passiert**:
   * Linter & Tests werden erneut als Safety-Check ausgeführt.
-  * Die Änderungen werden auf GitHub gepusht.
-  * Ein GitHub Pull Request wird automatisch erstellt (`gh pr create`).
+  * Offene Änderungen werden committet (`feat: complete tasks for issue #<ISSUE_ID>`).
+  * Der Branch wird auf GitHub gepusht.
+  * Ein GitHub Pull Request wird automatisch via `gh pr create` erstellt.
   * Das GitHub Issue wechselt vom Label `agent:in-progress` zu **`status:human-review`**.
-  * Der lokale Worktree wird aufgeräumt.
 
 ---
 
 ## 6. Grundregeln für Agenten
 
-1. **Kein Direkt-Push auf `main`**: Alle Änderungen laufen über Worktrees, Branches (`feat/issue-<id>`) und PRs.
-2. **Keine kaputten Builds pushen**: Ein Branch darf niemals gepusht werden, wenn `npm run lint` oder `npm test` fehlschlagen.
-3. **Fokussierte PRs**: Bearbeite nur die Aufgaben des jeweiligen GitHub Issues.
-4. **KEIN automatischer Merge & KEIN Schließen von Issues**: Der Agent erstellt den PR (`gh pr create`) und setzt das Issue-Label auf `status:human-review`. Der PR und das GitHub Issue bleiben **ausdrücklich offen**, bis ein menschlicher Entwickler sie im Human Review prüft und freigibt.
+1. **GitHub Issues sind die einzige Arbeitsquelle**: Keine eigenmächtigen Implementierungen ohne zugehöriges GitHub Issue.
+2. **Kein Direkt-Push auf `main`**: Alle Änderungen laufen über isolierte Worktrees, Branches (`feat/issue-<id>`) und PRs.
+3. **Keine kaputten Builds pushen**: Ein Branch darf niemals gepusht werden, wenn `npm run typecheck`, `npm run lint` oder `npm test` fehlschlagen.
+4. **Fokussierte PRs**: Bearbeite nur die Aufgaben des jeweiligen GitHub Issues.
+5. **KEIN automatischer Merge & KEIN Schließen von Issues**: Der Agent erstellt den PR (`gh pr create`) und setzt das Issue-Label auf `status:human-review`. Der PR und das GitHub Issue bleiben **ausdrücklich offen**, bis ein menschlicher Entwickler sie im Human Review prüft und freigibt.
