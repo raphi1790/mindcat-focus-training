@@ -66,15 +66,18 @@ export function useExerciseEngine(
     onLevelUpRef.current = onLevelUp;
   }, [onLevelUp]);
 
+  const baseDurationMs = initialState?.durationMs ?? 0;
+
   // Checkpoint-Trigger: nach jedem echten Level-Aufstieg genau einmal. Der
   // Ref-Guard macht das StrictMode-fest (Doppel-Setup des Effekts feuert nicht
   // erneut) und verhindert ein Feuern beim Mount.
   useEffect(() => {
     if (state.level > lastLevelRef.current) {
       lastLevelRef.current = state.level;
-      onLevelUpRef.current?.(state);
+      const currentDurationMs = baseDurationMs + (now() - startRef.current);
+      onLevelUpRef.current?.({ ...state, durationMs: currentDurationMs });
     }
-  }, [state]);
+  }, [state, baseDurationMs]);
 
   const recordTrial = useCallback(
     (outcome: TrialOutcome, rawEvent?: Record<string, unknown>) => {
@@ -94,7 +97,7 @@ export function useExerciseEngine(
   useEffect(() => {
     if (state.done && !firedRef.current) {
       firedRef.current = true;
-      const durationMs = now() - startRef.current;
+      const durationMs = baseDurationMs + (now() - startRef.current);
       const result = finalizeExerciseResult(
         exerciseId,
         state,
@@ -103,7 +106,7 @@ export function useExerciseEngine(
       );
       onCompleteRef.current(result);
     }
-  }, [state, exerciseId, logRawEvents]);
+  }, [state, exerciseId, logRawEvents, baseDurationMs]);
 
   return { state, recordTrial, logEvent };
 }

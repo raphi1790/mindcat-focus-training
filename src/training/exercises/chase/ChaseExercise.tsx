@@ -68,7 +68,7 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
   // Mount sofort neu (seeded RNG darf nicht während des Renders gelesen werden).
   const [targetPos, setTargetPos] = useState<Pos>({ x: 0, y: 0 });
   const [flash, setFlash] = useState<'success' | 'error' | null>(null);
-  const [remainingMs, setRemainingMs] = useState(() => timeLimitForLevel(1));
+  const [remainingMs, setRemainingMs] = useState(() => timeLimitForLevel(initialState?.level ?? 1));
 
   // Quelle der Wahrheit für Bewegung/Timer außerhalb von State-Updatern
   // (React StrictMode ruft Updater-Funktionen im Dev-Modus doppelt auf —

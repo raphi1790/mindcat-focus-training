@@ -24,7 +24,7 @@ export default function MazeExercise({ onComplete, onCancel, initialState, onLev
     initialState,
     onLevelUp,
   });
-  const [catPos, setCatPos] = useState(() => getStartPosition(1));
+  const [catPos, setCatPos] = useState(() => getStartPosition(initialState?.level ?? 1));
   const [flash, setFlash] = useState<'success' | null>(null);
   const [bumpSeq, setBumpSeq] = useState(0);
   const gateRef = useRef(createTrialGate());

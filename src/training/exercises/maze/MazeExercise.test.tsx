@@ -4,7 +4,8 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExerciseResult } from '../../../data/schema';
 import MazeExercise from './MazeExercise';
-import { LEVEL_MAPS } from './maps';
+import { LEVEL_MAPS, getStartPosition } from './maps';
+import { createExerciseProgress } from '../../engine';
 
 /**
  * useDirectionalInput treibt Bewegung über eine rAF-Schleife; jsdom kennt kein
@@ -181,4 +182,42 @@ describe('MazeExercise — Wände blockieren statt bestrafen (AP4/Befund E)', ()
     expect(result!.levelsCompleted).toBe(6);
     expect(result!.rawEvents?.some((e) => e.type === 'wallBump')).toBe(true);
   }, 15000);
+
+  it('Level 6 Resume: Katze spawnt auf getStartPosition(6) = (9, 13) und NICHT in der Wand von Level 1 (7, 12)', () => {
+    expect(getStartPosition(1)).toEqual({ x: 7, y: 12 });
+    expect(getStartPosition(6)).toEqual({ x: 9, y: 13 });
+    // In LEVEL_MAPS[6] ist (7, 12) eine feste Wand (Wert 1)!
+    expect(LEVEL_MAPS[6]![12]![7]).toBe(1); // Wand!
+    // Die korrekte Startposition für Level 6 ist (9, 13) (Wert 3).
+    expect(LEVEL_MAPS[6]![13]![9]).toBe(3); // Start!
+
+    const initialState = { ...createExerciseProgress(6), level: 6 };
+    const { container } = render(
+      <MazeExercise
+        ageGroup={6}
+        seed="ap4-test-seed"
+        initialState={initialState}
+        onComplete={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    // GridWorld hat 15 Spalten/Zeilen -> tileW = 100/15 % = 6.6666...%
+    // Start (9, 13) -> left: 60%, top: 86.666...%
+    // Wand (7, 12) -> left: 46.666...%, top: 80%
+    const tileW = 100 / 15;
+    const startLeft = `${9 * tileW}%`;
+    const startTop = `${13 * tileW}%`;
+    const wallLeft = `${7 * tileW}%`;
+    const wallTop = `${12 * tileW}%`;
+
+    const wallCat = container.querySelector(`[style*="left: ${wallLeft}"][style*="top: ${wallTop}"]`);
+    expect(wallCat).toBeNull();
+
+    const startCat = container.querySelector(`[style*="left: ${startLeft}"][style*="top: ${startTop}"]`);
+    expect(startCat).not.toBeNull();
+    expect(startCat?.textContent).toContain('🐱');
+
+    expect(container.textContent).toContain('Level 6');
+  });
 });

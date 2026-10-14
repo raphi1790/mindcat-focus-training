@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import Login from './components/Login';
 import { AssessmentRunner } from './assessment';
@@ -7,6 +7,7 @@ import { useChildrenProgress } from './children/useChildrenProgress';
 import { ChildDashboard } from './dashboard';
 import {
   completeTrainingSession,
+  findInProgressStandaloneSession,
   getLatestStandaloneLevel,
   startStandaloneSession,
   updateTrainingSessionProgress,
@@ -90,11 +91,14 @@ function DashboardShell() {
     seed: string;
     sessionId: string;
     initialLevel: number;
+    initialState?: ExerciseProgressState;
   } | null>(null);
   const [completedStandalone, setCompletedStandalone] = useState<{
     id: ExerciseId;
     result: ExerciseResult;
   } | null>(null);
+
+  const pendingStandaloneSaveRef = useRef<Promise<void> | null>(null);
 
   const childId = activeChild?.id ?? null;
   const { progress, refresh: refreshProgress } = useChildrenProgress(uid, childId ? [childId] : []);
@@ -142,6 +146,23 @@ function DashboardShell() {
     setCompletedStandalone(null);
     const seed = `mindcat-v1:practice:${id}`;
     try {
+      const existing = await findInProgressStandaloneSession(uid, activeChild.id, id);
+      const cp = existing?.checkpoint;
+      const cpState =
+        cp?.engineState ??
+        (cp as unknown as { exerciseState?: ExerciseProgressState } | undefined)?.exerciseState;
+      if (existing && cpState && !cpState.done) {
+        setStandaloneExercise({
+          id,
+          seed,
+          sessionId: existing.id,
+          initialLevel: cpState.level,
+          initialState: cpState,
+        });
+        setView('STANDALONE_EXERCISE');
+        return;
+      }
+
       const initialLevel = await getLatestStandaloneLevel(uid, activeChild.id, id);
       const sessionId = await startStandaloneSession(uid, activeChild.id, {
         exerciseId: id,
@@ -149,7 +170,16 @@ function DashboardShell() {
         rngSeed: seed,
         initialLevel,
       });
-      setStandaloneExercise({ id, seed, sessionId, initialLevel });
+      setStandaloneExercise({
+        id,
+        seed,
+        sessionId,
+        initialLevel,
+        initialState: {
+          ...createExerciseProgress(initialLevel),
+          level: initialLevel,
+        },
+      });
       setView('STANDALONE_EXERCISE');
     } catch (err) {
       console.error('Standalone-Übung konnte nicht initialisiert werden', err);
@@ -160,16 +190,28 @@ function DashboardShell() {
 
   const handleStandaloneLevelUp = (engineState: ExerciseProgressState) => {
     if (!standaloneExercise?.sessionId || !activeChild) return;
-    void updateTrainingSessionProgress(uid, activeChild.id, standaloneExercise.sessionId, {
+    setStandaloneExercise((prev) =>
+      prev ? { ...prev, initialLevel: engineState.level, initialState: engineState } : null,
+    );
+    const promise = updateTrainingSessionProgress(uid, activeChild.id, standaloneExercise.sessionId, {
       checkpoint: {
         exerciseIndex: 0,
         exerciseId: standaloneExercise.id,
         engineState,
+        exerciseState: engineState,
       },
     }).catch((err) => console.error('Standalone-Checkpoint konnte nicht gespeichert werden', err));
+    pendingStandaloneSaveRef.current = promise;
   };
 
-  const handleSessionCancel = () => {
+  const handleSessionCancel = async () => {
+    if (pendingStandaloneSaveRef.current) {
+      try {
+        await pendingStandaloneSaveRef.current;
+      } catch {
+        // ignore
+      }
+    }
     setCompletedStandalone(null);
     setStandaloneExercise(null);
     refreshProgress();
@@ -259,7 +301,12 @@ function DashboardShell() {
               <StandaloneComponent
                 ageGroup={activeChild.ageGroup}
                 seed={standaloneExercise.seed}
-                initialState={{ ...createExerciseProgress(), level: standaloneExercise.initialLevel }}
+                initialState={
+                  standaloneExercise.initialState ?? {
+                    ...createExerciseProgress(standaloneExercise.initialLevel),
+                    level: standaloneExercise.initialLevel,
+                  }
+                }
                 onLevelUp={handleStandaloneLevelUp}
                 onComplete={(result) => void handleStandaloneExerciseComplete(result)}
                 onCancel={handleSessionCancel}
