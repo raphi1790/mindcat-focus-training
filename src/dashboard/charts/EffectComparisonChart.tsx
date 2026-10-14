@@ -1,12 +1,12 @@
-import type { EffectMetric, EffectSummary } from '../effectSummary';
+import { isMetricImproved, type EffectMetric, type EffectSummary } from '../effectSummary';
 import { CHART_COLORS, formatSigned } from './chartTheme';
 import DataTable from './DataTable';
 
 /**
  * Prä-vs-Post-Effektdarstellung (Plan §5.3 Punkt 1): kleine Slope-Charts je
- * Netzwerk-Score. Ein Rückgang gilt für alle fünf Metriken als Verbesserung
- * (schnellere/stabilere Verarbeitung, weniger Fehler) — daher eine
- * einheitliche ▼/▲-Kennzeichnung mit Text, nie Farbe allein.
+ * Netzwerk-Score. Ein Rückgang gilt für overallRT, conflictRT und Fehlerrate
+ * als Verbesserung; für alertingRT und orientingRT (Aufmerksamkeitsnutzen)
+ * gilt ein Anstieg als Verbesserung.
  */
 
 const WIDTH = 200;
@@ -15,6 +15,10 @@ const PAD_TOP = 28;
 const PAD_BOTTOM = 26;
 const X0 = 46;
 const X1 = WIDTH - 46;
+
+function formatMetricValue(value: number, unit: EffectMetric['unit'] | string): string {
+  return unit === '%' ? `${value.toFixed(1)} %` : `${Math.round(value)} ms`;
+}
 
 function computeDomain(a: number, b: number): [number, number] {
   const min = Math.min(a, b);
@@ -37,23 +41,24 @@ function MetricSlope({ metric }: { metric: EffectMetric }) {
   const [domainMin, domainMax] = computeDomain(metric.baseline, metric.post);
   const yBaseline = yFor(metric.baseline, domainMin, domainMax);
   const yPost = yFor(metric.post, domainMin, domainMax);
-  const improved = metric.delta < 0;
+  const improved = isMetricImproved(metric);
   const unchanged = metric.delta === 0;
   const badgeColor = unchanged ? CHART_COLORS.inkMuted : improved ? CHART_COLORS.successText : CHART_COLORS.inkSecondary;
-  const icon = unchanged ? '±' : improved ? '▼' : '▲';
+  const icon = unchanged ? '±' : metric.delta > 0 ? '▲' : '▼';
+  const decimals = metric.unit === '%' ? 1 : undefined;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
       <div className="flex items-start justify-between gap-2 mb-1">
         <h4 className="text-sm font-bold text-slate-700 leading-tight">{metric.label}</h4>
         <span className="inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap" style={{ color: badgeColor }}>
-          {icon} {formatSigned(metric.delta, unitSuffix(metric.unit))}
+          {icon} {formatSigned(metric.delta, unitSuffix(metric.unit), decimals)}
         </span>
       </div>
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         role="img"
-        aria-label={`${metric.label}: Baseline ${Math.round(metric.baseline)}${unitSuffix(metric.unit)}, Post ${Math.round(metric.post)}${unitSuffix(metric.unit)}`}
+        aria-label={`${metric.label}: Baseline ${formatMetricValue(metric.baseline, metric.unit)}, Post ${formatMetricValue(metric.post, metric.unit)}`}
         className="w-full h-auto"
       >
         <line
@@ -68,12 +73,10 @@ function MetricSlope({ metric }: { metric: EffectMetric }) {
         <circle cx={X0} cy={yBaseline} r={5} fill={CHART_COLORS.inkMuted} stroke={CHART_COLORS.surface} strokeWidth={2} />
         <circle cx={X1} cy={yPost} r={5} fill={CHART_COLORS.seriesBlue} stroke={CHART_COLORS.surface} strokeWidth={2} />
         <text x={X0} y={Math.max(12, yBaseline - 10)} textAnchor="middle" fontSize={11} fill={CHART_COLORS.inkSecondary}>
-          {Math.round(metric.baseline)}
-          {unitSuffix(metric.unit)}
+          {formatMetricValue(metric.baseline, metric.unit)}
         </text>
         <text x={X1} y={Math.max(12, yPost - 10)} textAnchor="middle" fontSize={11} fill={CHART_COLORS.inkSecondary}>
-          {Math.round(metric.post)}
-          {unitSuffix(metric.unit)}
+          {formatMetricValue(metric.post, metric.unit)}
         </text>
         <text x={X0} y={HEIGHT - 4} textAnchor="middle" fontSize={10} fill={CHART_COLORS.inkMuted}>
           Baseline
@@ -109,9 +112,9 @@ export default function EffectComparisonChart({ summary }: { summary: EffectSumm
         columns={['Metrik', 'Baseline', 'Post', 'Δ', '% Änderung']}
         rows={summary.metrics.map((m) => [
           m.label,
-          `${Math.round(m.baseline)}${unitSuffix(m.unit)}`,
-          `${Math.round(m.post)}${unitSuffix(m.unit)}`,
-          formatSigned(m.delta, unitSuffix(m.unit)),
+          formatMetricValue(m.baseline, m.unit),
+          formatMetricValue(m.post, m.unit),
+          formatSigned(m.delta, unitSuffix(m.unit), m.unit === '%' ? 1 : undefined),
           m.percentChange === null ? '—' : `${m.percentChange.toFixed(1)} %`,
         ])}
       />

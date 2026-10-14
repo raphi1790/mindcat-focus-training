@@ -102,7 +102,7 @@ export default function ChildDashboard({ uid, child, onReset }: ChildDashboardPr
               {a.timestamp instanceof Date
                 ? a.timestamp.toLocaleDateString()
                 : new Date((a.timestamp as { seconds?: number }).seconds ? (a.timestamp as { seconds: number }).seconds * 1000 : String(a.timestamp)).toLocaleDateString()}
-              ) wurde aufgrund hoher Fehlerrate (<strong>{(a.scores.overallErrorRate * 100).toFixed(1)} %</strong>, Schwelle: &gt; 40 %) von der statistischen Prä/Post-Auswertung ausgeschlossen.
+              ) wurde aufgrund hoher Fehlerrate (<strong>{a.scores.overallErrorRate.toFixed(1)} %</strong>, Schwelle: &gt; 40 %) von der statistischen Prä/Post-Auswertung ausgeschlossen.
             </p>
           ))}
         </div>

@@ -22,13 +22,23 @@ export function median(values: readonly number[]): number | null {
 /** Fehlerrate-Schwelle der Studie (in %), ab der ein Lauf ausgeschlossen wird. */
 export const EXCLUSION_ERROR_RATE_PERCENT = 40;
 
+/**
+ * Antizipatorische Reaktionszeit-Schwelle (200 ms) nach Rueda et al. (2004, S. 1031).
+ * Trials mit RT < 200 ms gelten als antizipatorisch (Raten / versehentliches Drücken)
+ * und werden von den RT-Analysen ausgeschlossen.
+ */
+export const MIN_VALID_RT_MS = 200;
+export const ANTICIPATORY_RT_THRESHOLD_MS = MIN_VALID_RT_MS;
+
 export interface AntScoringResult {
   scores: AntScores;
   quality: AssessmentQuality;
 }
 
 const rtsOf = (trials: readonly Trial[]): number[] =>
-  trials.filter((t): t is Trial & { rt: number } => t.rt !== null).map((t) => t.rt);
+  trials
+    .filter((t): t is Trial & { rt: number } => t.rt !== null && t.rt >= MIN_VALID_RT_MS)
+    .map((t) => t.rt);
 
 function accuracyPercent(trials: readonly Trial[]): number {
   if (trials.length === 0) return 0;
@@ -46,6 +56,9 @@ function accuracyPercent(trials: readonly Trial[]): number {
  */
 export function scoreAnt(trials: readonly Trial[]): AntScoringResult {
   const correctTrials = trials.filter((t) => t.correct === true);
+  const validCorrectTrials = correctTrials.filter(
+    (t) => t.rt !== null && t.rt >= MIN_VALID_RT_MS,
+  );
 
   const conditionRts: Record<string, number | null> = {
     'cue:none': median(rtsOf(correctTrials.filter((t) => t.cue === 'none'))),
@@ -95,7 +108,7 @@ export function scoreAnt(trials: readonly Trial[]): AntScoringResult {
   const quality: AssessmentQuality = {
     excluded,
     ...(reasons.length > 0 ? { reason: reasons.join('; ') } : {}),
-    validTrialCount: correctTrials.length,
+    validTrialCount: validCorrectTrials.length,
   };
 
   return { scores, quality };
