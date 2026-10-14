@@ -48,6 +48,7 @@ export const exerciseProgressStateSchema = z.object({
   missed: z.number().int().nonnegative(),
   perLevel: z.array(perLevelStatsSchema),
   done: z.boolean(),
+  durationMs: z.number().nonnegative().optional(),
 });
 export type ExerciseProgressStateShape = z.infer<typeof exerciseProgressStateSchema>;
 
@@ -85,6 +86,7 @@ export const trainingCheckpointInputSchema = z.object({
   exerciseIndex: z.number().int().nonnegative(),
   exerciseId: exerciseIdSchema,
   engineState: exerciseProgressStateSchema,
+  exerciseState: exerciseProgressStateSchema.optional(),
 });
 export type TrainingCheckpointInput = z.infer<typeof trainingCheckpointInputSchema>;
 

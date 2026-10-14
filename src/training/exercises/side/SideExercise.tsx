@@ -19,7 +19,7 @@ function tileKind(value: number): GridTileKind {
 
 export default function SideExercise({ onComplete, onCancel, initialState, onLevelUp }: ExerciseProps) {
   const { state, recordTrial } = useExerciseEngine('side', CONFIG, onComplete, { initialState, onLevelUp });
-  const [catPos, setCatPos] = useState(() => getStartPosition(1));
+  const [catPos, setCatPos] = useState(() => getStartPosition(initialState?.level ?? 1));
   const [flash, setFlash] = useState<'success' | 'error' | null>(null);
   const gateRef = useRef(createTrialGate());
 

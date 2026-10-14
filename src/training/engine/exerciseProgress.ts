@@ -50,19 +50,21 @@ export interface ExerciseProgressState {
   missed: number;
   perLevel: PerLevelStats[];
   done: boolean;
+  durationMs?: number;
 }
 
-export function createExerciseProgress(): ExerciseProgressState {
+export function createExerciseProgress(initialLevel = 1): ExerciseProgressState {
   return {
-    level: 1,
+    level: initialLevel,
     streak: 0,
     qualifierSeenInStreak: false,
     totalTrials: 0,
     correct: 0,
     errors: 0,
     missed: 0,
-    perLevel: [{ level: 1, trials: 0, correct: 0, errors: 0 }],
+    perLevel: [{ level: initialLevel, trials: 0, correct: 0, errors: 0 }],
     done: false,
+    durationMs: 0,
   };
 }
 
@@ -113,7 +115,18 @@ export function applyTrialOutcome(
     }
   }
 
-  return { level, streak, qualifierSeenInStreak, totalTrials, correct, errors, missed, perLevel, done };
+  return {
+    level,
+    streak,
+    qualifierSeenInStreak,
+    totalTrials,
+    correct,
+    errors,
+    missed,
+    perLevel,
+    done,
+    durationMs: state.durationMs,
+  };
 }
 
 export function finalizeExerciseResult(
