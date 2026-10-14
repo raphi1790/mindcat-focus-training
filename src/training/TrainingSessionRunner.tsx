@@ -6,6 +6,7 @@ import {
   updateTrainingSessionProgress,
 } from '../data/firestore';
 import type { AgeGroup, ExerciseId, ExerciseResult, TrainingSessionInput } from '../data/schema';
+import { useConfirmInput } from '../platform/input';
 import { Confetti, soundManager } from '../ui';
 import { createExerciseProgress, type ExerciseProgressState } from './engine';
 import { EXERCISE_COMPONENTS } from './exercises';
@@ -103,8 +104,16 @@ export default function TrainingSessionRunner({
           if (resumeIndex >= exerciseIds.length) {
             // Alle Übungen bereits erledigt (Crash nach der letzten Übung, vor
             // dem Abschluss) → jetzt abschließen und feiern.
-            await completeTrainingSession(uid, childId, existing.id, results);
-            setState({ step: 'done', results });
+            try {
+              await completeTrainingSession(uid, childId, existing.id, results);
+              setState({ step: 'done', results });
+            } catch (err) {
+              setState({
+                step: 'saveError',
+                results,
+                message: err instanceof Error ? err.message : String(err),
+              });
+            }
             return;
           }
           // Checkpoint nur übernehmen, wenn er zur fortzusetzenden Übung gehört.
@@ -223,19 +232,7 @@ export default function TrainingSessionRunner({
   }
 
   if (state.step === 'initError') {
-    return (
-      <ScreenFrame>
-        <div className="text-6xl mb-6">⚠️</div>
-        <h2 className="text-3xl font-bold text-slate-800 mb-4">Start fehlgeschlagen</h2>
-        <p className="text-sm text-slate-400 mb-8 break-words">{state.message}</p>
-        <button
-          onClick={onCancel}
-          className="w-full bg-purple-600 text-white font-bold py-4 rounded-2xl hover:bg-purple-700 transition-colors text-xl"
-        >
-          Zurück zum Dashboard
-        </button>
-      </ScreenFrame>
-    );
+    return <SessionInitError message={state.message} onCancel={onCancel} />;
   }
 
   if (state.step === 'running') {
@@ -279,28 +276,60 @@ export default function TrainingSessionRunner({
   }
 
   if (state.step === 'saveError') {
-    return (
-      <ScreenFrame>
-        <div className="text-6xl mb-6">⚠️</div>
-        <h2 className="text-3xl font-bold text-slate-800 mb-4">Speichern fehlgeschlagen</h2>
-        <p className="text-slate-600 mb-2">
-          Die Ergebnisse sind noch im Speicher und gehen nicht verloren.
-        </p>
-        <p className="text-sm text-slate-400 mb-8 break-words">{state.message}</p>
-        <button
-          onClick={() => void finish(state.results)}
-          className="w-full bg-purple-600 text-white font-bold py-4 rounded-2xl hover:bg-purple-700 transition-colors text-xl"
-        >
-          Erneut versuchen
-        </button>
-      </ScreenFrame>
-    );
+    return <SessionSaveError message={state.message} onRetry={() => void finish(state.results)} />;
   }
 
   return <SessionCelebration sessionDay={sessionDay} results={state.results} onFinished={onFinished} />;
 }
 
 /** Tagesabschluss-Feier: Konfetti, Fanfare, Sterne-Bilanz (Plan §6.3). */
+function SessionInitError({ message, onCancel }: { message: string; onCancel: () => void }) {
+  useConfirmInput(onCancel);
+  return (
+    <ScreenFrame>
+      <div className="text-6xl mb-6">⚠️</div>
+      <h2 className="text-3xl font-bold text-slate-800 mb-4">Start fehlgeschlagen</h2>
+      <p className="text-sm text-slate-400 mb-8 break-words">{message}</p>
+      <button
+        onClick={onCancel}
+        className="w-full bg-purple-600 text-white font-bold py-4 rounded-2xl hover:bg-purple-700 transition-colors text-xl cursor-pointer"
+      >
+        Zurück zum Dashboard
+      </button>
+      <p className="text-xs text-slate-400 mt-3">Arcade-Button oder Enter drücken</p>
+    </ScreenFrame>
+  );
+}
+
+/** Speicherfehler-Ansicht mit Bestätigungseingabe (Enter / Arcade) */
+function SessionSaveError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  useConfirmInput(onRetry);
+
+  return (
+    <ScreenFrame>
+      <div className="text-6xl mb-6">⚠️</div>
+      <h2 className="text-3xl font-bold text-slate-800 mb-4">Speichern fehlgeschlagen</h2>
+      <p className="text-slate-600 mb-2">
+        Die Ergebnisse sind noch im Speicher und gehen nicht verloren.
+      </p>
+      <p className="text-sm text-slate-400 mb-8 break-words">{message}</p>
+      <button
+        onClick={onRetry}
+        className="w-full bg-purple-600 text-white font-bold py-4 rounded-2xl hover:bg-purple-700 transition-colors text-xl cursor-pointer"
+      >
+        Erneut versuchen
+      </button>
+      <p className="text-xs text-slate-400 mt-3">Arcade-Button oder Enter drücken</p>
+    </ScreenFrame>
+  );
+}
+
 function SessionCelebration({
   sessionDay,
   results,
@@ -313,6 +342,8 @@ function SessionCelebration({
   useEffect(() => {
     soundManager.play('fanfare');
   }, []);
+
+  useConfirmInput(onFinished);
 
   const totalStars = results.reduce((sum, r) => sum + starsForResult(r), 0);
 
@@ -352,10 +383,11 @@ function SessionCelebration({
 
       <button
         onClick={onFinished}
-        className="w-full bg-purple-600 text-white font-bold py-4 rounded-2xl hover:bg-purple-700 transition-colors text-xl"
+        className="w-full bg-purple-600 text-white font-bold py-4 rounded-2xl hover:bg-purple-700 transition-colors text-xl cursor-pointer"
       >
         Zurück zum Dashboard
       </button>
+      <p className="text-xs text-slate-400 mt-3">Arcade-Button oder Enter drücken</p>
     </ScreenFrame>
   );
 }
