@@ -57,42 +57,27 @@ npm run lint        # ESLint
 npm run build       # Produktions-Build
 ```
 
-## 7. GitLab CI/CD & Deployment
+## 7. GitHub Actions CI/CD & Deployment
 
-Die CI/CD-Pipeline (`.gitlab-ci.yml`) führt bei jedem Push und Merge Request automatische Quality-Checks aus und deployt getaggte Releases (`vX.Y.Z`) auf Firebase Hosting.
+Die automatisierte CI/CD-Pipeline (`.github/workflows/deploy.yml`) führt bei jedem Push und Pull Request automatische Quality-Checks aus und deployt Hosting sowie Firestore Security Rules atomar auf Firebase.
 
-### Pipeline-Stufen
+### Pipeline-Übersicht
 
-1. **`test`**: Läuft auf allen Branches und Commits:
-   - `typecheck`: TypeScript-Typüberprüfung (`tsc --noEmit`)
-   - `lint`: ESLint-Prüfung (`eslint .`)
-   - `unit-tests`: Vitest Unit- und Integrationstests (`npm test`)
-   - `pilot-test`: Längsschnitt-E2E-Pilottest (`npm run pilot`)
-2. **`build`**: Erstellt die Bundles (`build:qual` für Staging/Qual, `build:prod` für Produktion) und sichert die `dist/`-Artefakte.
-3. **`deploy`**: Tag-basiertes Deployment (z. B. `v1.0.0`):
-   - `deploy:qual`: Automatisches Deployment (`on_success`) auf die Qual/Staging-Umgebung.
-   - `deploy:prod`: Manuell freizugebendes Deployment (`manual`) auf die Produktivumgebung.
+1. **Quality Gates (`test`)**:
+   - Läuft auf allen Branches, PRs und Tags.
+   - Führt `typecheck`, `lint`, `test`, `pilot`, `test:rules` und `test:e2e` aus.
+   - Nutzt Node.js 22 LTS und Java 21 Temurin mit zwischengespeicherten Firebase-Emulatoren.
+2. **Staging / Qual (`deploy-qual`)**:
+   - Automatisches Deployment bei Push auf `main` (oder manuell via `workflow_dispatch`).
+   - Deployt Hosting & Firestore Security Rules auf die Staging-Umgebung (`qual`).
+3. **Produktion (`deploy-prod`)**:
+   - Automatisches Deployment bei Push von Versions-Tags (`v*`, z. B. `v1.0.0`) (oder manuell via `workflow_dispatch`).
+   - Deployt Hosting & Firestore Security Rules auf die Produktivumgebung (`production`).
 
-### Erforderliche GitLab CI/CD Variablen
+### Ausführliche Dokumentation
 
-Unter **Settings → CI/CD → Variables** (als *Protected* und *Masked* hinterlegen):
+Eine vollständige Anleitung zu CI/CD, GitHub Environments, Secrets, Google Cloud Service Account IAM-Rollen, manuellem Deployment und Troubleshooting finden Sie in:
 
-| Variable | Beschreibung |
-|---|---|
-| `FIREBASE_TOKEN` | CI-Token generiert via `firebase login:ci` |
-| `FIREBASE_PROJECT_QUAL` | Firebase Projekt-ID für die Qual/Staging-Umgebung |
-| `FIREBASE_PROJECT_PROD` | Firebase Projekt-ID für die Produktivumgebung |
-| `VITE_FIREBASE_*` | Optional: Environment-spezifische API-Keys falls nicht in `.env.*` hinterlegt |
+👉 **[docs/DEPLOYMENT.md](DEPLOYMENT.md)**
 
-### Release- & Deployment-Ablauf
-
-1. Release taggen und pushen:
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-2. Die Pipeline führt `test` (`typecheck`, `lint`, `unit-tests`, `pilot-test`) und `build` (`build:qual`, `build:prod`) aus.
-3. Nach erfolgreichem Durchlauf wird `deploy:qual` automatisch ausgeführt.
-4. Das Release kann auf der Qual-Umgebung geprüft werden (`https://$FIREBASE_PROJECT_QUAL.web.app`).
-5. Anschließend kann `deploy:prod` in der GitLab CI-Pipeline-Übersicht per Klick manuell freigegeben werden (`https://$FIREBASE_PROJECT_PROD.web.app`).
 
