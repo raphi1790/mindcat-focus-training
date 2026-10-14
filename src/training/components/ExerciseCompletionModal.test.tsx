@@ -234,4 +234,75 @@ describe('ExerciseCompletionModal', () => {
     expect(screen.getByText('Farmer (Go/No-Go)')).toBeDefined();
     expect(screen.getByTestId('completion-icon').textContent).toBe('🐑');
   });
+  it("unterstützt Tastatur- und Arcade-Auswahl zwischen Optionen mit visueller Hervorhebung", () => {
+    let rafQueue: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      rafQueue.push(cb);
+      return rafQueue.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+
+    const onClose = vi.fn();
+    const onRestart = vi.fn();
+
+    render(
+      <ExerciseCompletionModal
+        result={sampleResult}
+        onClose={onClose}
+        onRestart={onRestart}
+      />,
+    );
+
+    const restartBtn = screen.getByRole("button", { name: /Nochmal spielen/i });
+    const closeBtn = screen.getByRole("button", { name: /Zurück zur Übersicht/i });
+
+    // Initial: Index 0 ("Nochmal spielen") ist selektiert und visuell hervorgehoben
+    expect(restartBtn.className).toContain("ring-4 ring-offset-2 scale-[1.02]");
+    expect(closeBtn.className).not.toContain("ring-4 ring-offset-2 scale-[1.02]");
+
+    // Enter bestätigt Index 0 -> onRestart
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onRestart).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Richtungseingabe nach unten (ArrowDown)
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+      const queue = rafQueue;
+      rafQueue = [];
+      for (const cb of queue) cb(performance.now() + 300);
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowDown" }));
+    });
+
+    // Jetzt ist Index 1 ("Zurück zur Übersicht") selektiert
+    expect(closeBtn.className).toContain("ring-4 ring-offset-2 scale-[1.02]");
+    expect(restartBtn.className).not.toContain("ring-4 ring-offset-2 scale-[1.02]");
+
+    // Enter bestätigt Index 1 -> onClose
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // Richtungseingabe zurück nach oben (ArrowUp)
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp" }));
+      const queue = rafQueue;
+      rafQueue = [];
+      for (const cb of queue) cb(performance.now() + 600);
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowUp" }));
+    });
+
+    // Wieder Index 0 ("Nochmal spielen") selektiert
+    expect(restartBtn.className).toContain("ring-4 ring-offset-2 scale-[1.02]");
+    expect(closeBtn.className).not.toContain("ring-4 ring-offset-2 scale-[1.02]");
+
+    fireEvent.keyDown(window, { key: " " });
+    expect(onRestart).toHaveBeenCalledTimes(2);
+
+    vi.unstubAllGlobals();
+  });
+
 });

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { connectedGamepads, exitComboPressedFromGamepad } from "../platform/input";
 
 /**
  * Kindersicherung zum Beenden (Plan §6.3): 3 Sekunden durchgehend halten —
- * per Maus/Touch auf dem Knopf oder per Escape-Taste (für Betreuer an
- * Tastatur/Arcade-Aufbau). Einzelne Tastendrücke bewirken nichts, versehent-
- * liche Abbrüche sind damit ausgeschlossen. Bewusst ohne Sound/Animation-
+ * per Maus/Touch auf dem Knopf, per Escape-Taste oder per Arcade-Kombination
+ * (Buttons 0 & 1 gleichzeitig für 3s halten). Einzelne Tastendrücke bewirken nichts,
+ * versehentliche Abbrüche sind damit ausgeschlossen. Bewusst ohne Sound/Animation-
  * Schnickschnack: wird auch im ANT verwendet (Test bleibt clean).
  */
 
@@ -29,38 +30,78 @@ export default function HoldToExit({ onExit, floating = true }: HoldToExitProps)
     onExitRef.current = onExit;
   }, [onExit]);
 
-  const startHold = () => {
+  const startHold = useCallback(() => {
     if (timeoutRef.current !== null) return;
     setIsHolding(true);
     timeoutRef.current = setTimeout(() => {
       timeoutRef.current = null;
       onExitRef.current();
     }, HOLD_MS);
-  };
+  }, []);
 
-  const cancelHold = () => {
+  const cancelHold = useCallback(() => {
     setIsHolding(false);
     if (timeoutRef.current !== null) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
-  };
+  }, []);
 
   // Escape gedrückt halten = gleicher 3-Sekunden-Halte-Mechanismus.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.repeat) startHold();
+      if (e.key === "Escape" && !e.repeat) startHold();
     };
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') cancelHold();
+      if (e.key === "Escape") cancelHold();
     };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
     };
-  }, []);
+  }, [startHold, cancelHold]);
+
+  // Fenster-Fokusverlust sofort abfangen (verhindert hängengebliebenen Timer bei Fokusverlust)
+  useEffect(() => {
+    const handleBlur = () => {
+      cancelHold();
+    };
+    window.addEventListener("blur", handleBlur);
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [cancelHold]);
+
+  // Arcade-Kombination: Polling auf gleichzeitiges Drücken von Button 0 & 1 für 3s
+  useEffect(() => {
+    let rafId: number;
+    let arcadeHolding = false;
+
+    const poll = () => {
+      const isCombo = connectedGamepads().some(exitComboPressedFromGamepad);
+
+      if (isCombo) {
+        if (!arcadeHolding) {
+          arcadeHolding = true;
+          startHold();
+        }
+      } else {
+        if (arcadeHolding) {
+          arcadeHolding = false;
+          cancelHold();
+        }
+      }
+
+      rafId = requestAnimationFrame(poll);
+    };
+
+    rafId = requestAnimationFrame(poll);
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [startHold, cancelHold]);
 
   useEffect(() => {
     return () => {
@@ -70,7 +111,7 @@ export default function HoldToExit({ onExit, floating = true }: HoldToExitProps)
 
   return (
     <div
-      className={`${floating ? 'absolute top-6 right-6 z-50' : 'relative'} w-16 h-16 flex items-center justify-center cursor-pointer touch-none select-none`}
+      className={`${floating ? "absolute top-6 right-6 z-50" : "relative"} w-16 h-16 flex items-center justify-center cursor-pointer touch-none select-none`}
       onMouseDown={startHold}
       onMouseUp={cancelHold}
       onMouseLeave={cancelHold}
@@ -97,13 +138,13 @@ export default function HoldToExit({ onExit, floating = true }: HoldToExitProps)
           stroke="currentColor"
           strokeWidth="6"
           strokeDasharray="283"
-          strokeDashoffset={isHolding ? '0' : '283'}
-          className={`transition-all ease-linear ${isHolding ? 'duration-[3000ms]' : 'duration-300'}`}
+          strokeDashoffset={isHolding ? "0" : "283"}
+          className={`transition-all ease-linear ${isHolding ? "duration-[3000ms]" : "duration-300"}`}
         />
       </svg>
 
       <div
-        className={`relative z-10 text-2xl font-bold transition-colors ${isHolding ? 'text-red-500' : 'text-slate-400'}`}
+        className={`relative z-10 text-2xl font-bold transition-colors ${isHolding ? "text-red-500" : "text-slate-400"}`}
       >
         ✕
       </div>

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   choiceFromGamepad,
   confirmPressedFromGamepad,
+  exitComboPressedFromGamepad,
   directionFromGamepad,
   type GamepadLike,
 } from './gamepad';
@@ -98,5 +99,29 @@ describe('confirmPressedFromGamepad', () => {
   it('fehlende Buttons (kurzes Array) crashen nicht', () => {
     const minimal: GamepadLike = { axes: [], buttons: [] };
     expect(confirmPressedFromGamepad(minimal)).toBe(false);
+  });
+});
+
+describe("exitComboPressedFromGamepad", () => {
+  it("neutral -> false", () => {
+    expect(exitComboPressedFromGamepad(pad())).toBe(false);
+  });
+
+  it("nur Button 0 oder nur Button 1 gedrückt -> false", () => {
+    expect(exitComboPressedFromGamepad(pad({ pressed: [0] }))).toBe(false);
+    expect(exitComboPressedFromGamepad(pad({ pressed: [1] }))).toBe(false);
+  });
+
+  it("Buttons 0 und 1 gleichzeitig gedrückt -> true", () => {
+    expect(exitComboPressedFromGamepad(pad({ pressed: [0, 1] }))).toBe(true);
+  });
+
+  it("weitere Buttons gedrückt stören die 0+1-Kombination nicht", () => {
+    expect(exitComboPressedFromGamepad(pad({ pressed: [0, 1, 2] }))).toBe(true);
+  });
+
+  it("fehlende Buttons crashen nicht", () => {
+    const minimal: GamepadLike = { axes: [], buttons: [] };
+    expect(exitComboPressedFromGamepad(minimal)).toBe(false);
   });
 });

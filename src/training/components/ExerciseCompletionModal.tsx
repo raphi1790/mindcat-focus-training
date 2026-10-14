@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ExerciseId, ExerciseResult } from '../../data/schema';
-import { useConfirmInput } from '../../platform/input';
+import { useConfirmInput, useDirectionalInput } from '../../platform/input';
 import { Confetti, ParticleBurst, soundManager } from '../../ui';
 import { EXERCISE_ICONS, EXERCISE_LABELS } from '../labels';
 import { starsForResult } from '../rewards';
@@ -65,8 +65,34 @@ export default function ExerciseCompletionModal({
     return () => clearTimeout(timeout);
   }, [onClose, autoCloseMs]);
 
-  // Eingabe über Arcade-Button / Enter / Leertaste
-  useConfirmInput(onClose);
+  const hasRestart = typeof onRestart === "function";
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // Tastatur- & Arcade-Auswahl zwischen Optionen via useDirectionalInput
+  useDirectionalInput(
+    useCallback(
+      ({ dx, dy }) => {
+        if (!hasRestart) return;
+        if (dx < 0 || dy < 0) {
+          setSelectedIndex(0);
+        } else if (dx > 0 || dy > 0) {
+          setSelectedIndex(1);
+        }
+      },
+      [hasRestart],
+    ),
+  );
+
+  // useConfirmInput bestätigt die gewählte Option
+  useConfirmInput(
+    useCallback(() => {
+      if (hasRestart && selectedIndex === 0) {
+        onRestart();
+      } else {
+        onClose();
+      }
+    }, [hasRestart, selectedIndex, onRestart, onClose]),
+  );
 
   const accuracyPercent =
     result.trials > 0 ? Math.round((result.correct / result.trials) * 100) : 100;
@@ -168,7 +194,12 @@ export default function ExerciseCompletionModal({
             <button
               type="button"
               onClick={onRestart}
-              className="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-bold py-3.5 px-6 rounded-2xl transition-all text-lg shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              onMouseEnter={() => setSelectedIndex(0)}
+              className={`w-full bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-bold py-3.5 px-6 rounded-2xl transition-all text-lg shadow-md flex items-center justify-center gap-2 cursor-pointer ${
+                selectedIndex === 0
+                  ? "ring-4 ring-offset-2 scale-[1.02] ring-emerald-400"
+                  : ""
+              }`}
             >
               <span>Nochmal spielen</span>
               <span>🔄</span>
@@ -178,7 +209,12 @@ export default function ExerciseCompletionModal({
           <button
             type="button"
             onClick={onClose}
-            className="w-full bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-bold py-3.5 px-6 rounded-2xl transition-all text-lg shadow-md flex items-center justify-center gap-2 cursor-pointer"
+            onMouseEnter={() => setSelectedIndex(hasRestart ? 1 : 0)}
+            className={`w-full bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-bold py-3.5 px-6 rounded-2xl transition-all text-lg shadow-md flex items-center justify-center gap-2 cursor-pointer ${
+              (hasRestart ? selectedIndex === 1 : selectedIndex === 0)
+                ? "ring-4 ring-offset-2 scale-[1.02] ring-purple-400"
+                : ""
+            }`}
           >
             <span>Zurück zur Übersicht</span>
             <span>🏠</span>
