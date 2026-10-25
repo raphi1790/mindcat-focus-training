@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { z } from 'zod';
 import { db } from '../../services/firebase';
-import { createExerciseProgress } from '../../training/engine/exerciseProgress';
+import { createExerciseProgress, type ExerciseProgressState } from '../../training/engine/exerciseProgress';
 import {
   exerciseResultSchema,
   trainingCheckpointInputSchema,
@@ -149,7 +149,11 @@ export async function startStandaloneSession(
       exerciseIndex: 0,
       exerciseId: input.exerciseId,
       engineState: {
-        ...createExerciseProgress(),
+        ...createExerciseProgress(level),
+        level,
+      },
+      exerciseState: {
+        ...createExerciseProgress(level),
         level,
       },
     }),
@@ -185,7 +189,12 @@ export async function getLatestStandaloneLevel(
       }
     }
     if (session.checkpoint && session.checkpoint.exerciseId === exerciseId) {
-      maxLevel = Math.max(maxLevel, session.checkpoint.engineState.level);
+      const cpState =
+        session.checkpoint.engineState ??
+        (session.checkpoint as unknown as { exerciseState?: ExerciseProgressState }).exerciseState;
+      if (cpState) {
+        maxLevel = Math.max(maxLevel, cpState.level);
+      }
     }
   }
   return maxLevel;

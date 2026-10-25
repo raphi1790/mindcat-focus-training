@@ -118,9 +118,12 @@ export default function TrainingSessionRunner({
           }
           // Checkpoint nur übernehmen, wenn er zur fortzusetzenden Übung gehört.
           const cp = existing.checkpoint;
+          const cpState =
+            cp?.engineState ??
+            (cp as unknown as { exerciseState?: ExerciseProgressState } | undefined)?.exerciseState;
           const initialState =
-            cp && cp.exerciseIndex === resumeIndex && !cp.engineState.done
-              ? cp.engineState
+            cp && cp.exerciseIndex === resumeIndex && cpState && !cpState.done
+              ? cpState
               : undefined;
           setState({ step: 'running', index: resumeIndex, results, initialState });
           return;
@@ -141,18 +144,37 @@ export default function TrainingSessionRunner({
     })();
   }, [uid, childId, sessionDay, ageGroup, sessionSeed, exerciseIds]);
 
+  const pendingUpdateRef = useRef<Promise<void> | null>(null);
+
   // Checkpoint nach einem Level-Aufstieg (nicht-fatal: der spätere Abschluss
   // schreibt ohnehin die vollständige Ergebnisliste).
   const handleLevelUp = useCallback(
     (index: number, engineState: ExerciseProgressState) => {
       const sessionId = sessionIdRef.current;
       if (!sessionId) return;
-      void updateTrainingSessionProgress(uid, childId, sessionId, {
-        checkpoint: { exerciseIndex: index, exerciseId: exerciseIds[index]!, engineState },
+      const promise = updateTrainingSessionProgress(uid, childId, sessionId, {
+        checkpoint: {
+          exerciseIndex: index,
+          exerciseId: exerciseIds[index]!,
+          engineState,
+          exerciseState: engineState,
+        },
       }).catch((err) => console.error('Checkpoint konnte nicht gespeichert werden', err));
+      pendingUpdateRef.current = promise;
     },
     [uid, childId, exerciseIds],
   );
+
+  const handleCancel = useCallback(async () => {
+    if (pendingUpdateRef.current) {
+      try {
+        await pendingUpdateRef.current;
+      } catch {
+        // ignore
+      }
+    }
+    onCancel();
+  }, [onCancel]);
 
   // Übung abgeschlossen: Ergebnisliste fortschreiben und Checkpoint auf die
   // nächste Übung (frischer Zustand) setzen. Fehler sind nicht-fatal.
@@ -246,7 +268,7 @@ export default function TrainingSessionRunner({
         seed={deriveExerciseSeed(sessionSeed, exerciseId)}
         initialState={initialState}
         onLevelUp={(engineState) => handleLevelUp(index, engineState)}
-        onCancel={onCancel}
+        onCancel={handleCancel}
         onComplete={(result) => handleExerciseComplete(index, results, result)}
       />
     );
