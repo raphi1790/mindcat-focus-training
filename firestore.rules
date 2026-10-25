@@ -13,22 +13,27 @@ service cloud.firestore {
         allow read, write: if isOwner(uid);
 
         match /assessments/{assessmentId} {
-          allow read, create: if isOwner(uid);
+          allow read: if isOwner(uid);
           // Assessments sind wissenschaftliche Messungen: nachträgliches
-          // Ändern ist verboten. Löschen ist für den Betreuer erlaubt (Reset).
+          // Ändern und Löschen ist unter allen Umständen verboten.
+          // Beim Erstellen muss ein Server-Timestamp erzwungen werden.
+          allow create: if isOwner(uid) && hasServerTimestamp();
           allow update: if false;
-          allow delete: if isOwner(uid);
+          allow delete: if false;
         }
 
         match /trainingSessions/{sessionId} {
-          allow read, create: if isOwner(uid);
+          allow read: if isOwner(uid);
+          // Beim Erstellen muss ein Server-Timestamp erzwungen werden.
+          allow create: if isOwner(uid) && hasServerTimestamp();
           // Inkrementelles Speichern (AP6): Updates nur, solange die Sitzung
-          // läuft (`status == 'in-progress'` im *bestehenden* Dokument). Der
-          // Abschluss-Übergang (status → 'completed') fällt darunter; danach
-          // ist das Dokument wieder unveränderlich. Alt-Dokumente ohne
+          // läuft (`status == 'in-progress'` im *bestehenden* Dokument).
+          // Der Status darf nur in-progress oder completed sein.
+          // sessionDay, ageGroupAtTest, rngSeed und Timestamps sind unveränderlich.
+          // Danach ist das Dokument wieder unveränderlich. Alt-Dokumente ohne
           // status-Feld bleiben gesperrt.
           // Löschen ist für den Betreuer erlaubt (Spielstand-Reset, Issue #15).
-          allow update: if isOwner(uid) && resource.data.status == 'in-progress';
+          allow update: if isOwner(uid) && resource.data.status == 'in-progress' && isValidTrainingStatusTransition() && areTrainingMetadataUnchanged();
           allow delete: if isOwner(uid);
         }
       }
@@ -41,6 +46,24 @@ service cloud.firestore {
 
     function isOwner(uid) {
       return request.auth != null && request.auth.uid == uid;
+    }
+
+    function hasServerTimestamp() {
+      return (request.resource.data.get('timestamp', null) == request.time) ||
+             (request.resource.data.get('createdAt', null) == request.time);
+    }
+
+    function isValidTrainingStatusTransition() {
+      return request.resource.data.get('status', null) == 'in-progress' ||
+             request.resource.data.get('status', null) == 'completed';
+    }
+
+    function areTrainingMetadataUnchanged() {
+      return request.resource.data.get('sessionDay', null) == resource.data.get('sessionDay', null)
+          && request.resource.data.get('ageGroupAtTest', null) == resource.data.get('ageGroupAtTest', null)
+          && request.resource.data.get('rngSeed', null) == resource.data.get('rngSeed', null)
+          && request.resource.data.get('timestamp', null) == resource.data.get('timestamp', null)
+          && request.resource.data.get('createdAt', null) == resource.data.get('createdAt', null);
     }
   }
 }

@@ -7,10 +7,19 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore';
 
 /**
- * Phase 6 (Plan §9, §3): Verifiziert `firestore.rules` gegen den Firestore-
+ * Phase 6 (Plan §9, §3, Issue #26): Verifiziert `firestore.rules` gegen den Firestore-
  * Emulator. Kinderdaten sind sensibel — die Rules müssen jeden Zugriff strikt
  * an den eingeloggten Betreuer (`request.auth.uid == uid`) binden und Mess-
  * dokumente (assessments/trainingSessions) unveränderlich halten.
@@ -32,7 +41,7 @@ const validAssessment = {
   phase: 'baseline',
   ageGroupAtTest: 6,
   rngSeed: 'seed-1',
-  timestamp: new Date(),
+  timestamp: serverTimestamp(),
   scores: { overallRT: 900 },
 };
 
@@ -60,6 +69,13 @@ function asUser(uid: string) {
   return env.authenticatedContext(uid).firestore();
 }
 
+/** Dokument unter Umgehung der Rules seeden (reines Test-Setup). */
+async function seed(path: string, data: Record<string, unknown>) {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), path), data);
+  });
+}
+
 describe('firestore.rules — Betreuer-Bindung', () => {
   it('Betreuer darf sein eigenes Kind lesen und schreiben', async () => {
     const db = asUser(ALICE);
@@ -69,13 +85,10 @@ describe('firestore.rules — Betreuer-Bindung', () => {
   });
 
   it('Fremder Betreuer darf das Kind weder lesen noch schreiben', async () => {
-    // Alice legt ein Kind an (Rules umgangen, reines Seeding).
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(doc(ctx.firestore(), `users/${ALICE}/children/${CHILD}`), {
-        displayName: 'Fuchs',
-        ageGroup: 6,
-        archived: false,
-      });
+    await seed(`users/${ALICE}/children/${CHILD}`, {
+      displayName: 'Fuchs',
+      ageGroup: 6,
+      archived: false,
     });
     const bob = asUser(BOB);
     const ref = doc(bob, `users/${ALICE}/children/${CHILD}`);
@@ -89,8 +102,8 @@ describe('firestore.rules — Betreuer-Bindung', () => {
   });
 });
 
-describe('firestore.rules — Assessments (append-only)', () => {
-  it('Betreuer darf ein Assessment anlegen und lesen', async () => {
+describe('firestore.rules — Assessments (append-only & immutability)', () => {
+  it('Betreuer darf ein Assessment mit Server-Timestamp anlegen und lesen', async () => {
     const db = asUser(ALICE);
     const ref = doc(db, `users/${ALICE}/children/${CHILD}/assessments/a1`);
     await assertSucceeds(setDoc(ref, validAssessment));
@@ -100,25 +113,41 @@ describe('firestore.rules — Assessments (append-only)', () => {
     );
   });
 
-  it('Assessments sind unveränderlich (Update verboten); Besitzer darf für Reset löschen', async () => {
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(
-        doc(ctx.firestore(), `users/${ALICE}/children/${CHILD}/assessments/a1`),
-        validAssessment,
-      );
+  it('Erstellen eines Assessments ohne Server-Timestamp schlägt fehl', async () => {
+    const db = asUser(ALICE);
+    const ref = doc(db, `users/${ALICE}/children/${CHILD}/assessments/a1`);
+    await assertFails(setDoc(ref, { ...validAssessment, timestamp: new Date() }));
+  });
+
+  it('Erstellen eines Assessments ohne Timestamp-Feld schlägt fehl', async () => {
+    const db = asUser(ALICE);
+    const ref = doc(db, `users/${ALICE}/children/${CHILD}/assessments/a1`);
+    const withoutTs = {
+      phase: validAssessment.phase,
+      ageGroupAtTest: validAssessment.ageGroupAtTest,
+      rngSeed: validAssessment.rngSeed,
+      scores: validAssessment.scores,
+    };
+    await assertFails(setDoc(ref, withoutTs));
+  });
+
+  it('Assessments sind unveränderlich: Update und Löschen sind verboten', async () => {
+    await seed(`users/${ALICE}/children/${CHILD}/assessments/a1`, {
+      ...validAssessment,
+      timestamp: new Date(),
     });
     const db = asUser(ALICE);
     const ref = doc(db, `users/${ALICE}/children/${CHILD}/assessments/a1`);
     await assertFails(setDoc(ref, { ...validAssessment, rngSeed: 'tampered' }));
-    await assertSucceeds(deleteDoc(ref));
+    await assertFails(updateDoc(ref, { rngSeed: 'tampered' }));
+    // Löschen ist unter allen Umständen verboten (Schutz wissenschaftlicher Messdaten)
+    await assertFails(deleteDoc(ref));
   });
 
   it('Fremder darf Assessments nicht lesen oder löschen', async () => {
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(
-        doc(ctx.firestore(), `users/${ALICE}/children/${CHILD}/assessments/a1`),
-        validAssessment,
-      );
+    await seed(`users/${ALICE}/children/${CHILD}/assessments/a1`, {
+      ...validAssessment,
+      timestamp: new Date(),
     });
     const bob = asUser(BOB);
     const ref = doc(bob, `users/${ALICE}/children/${CHILD}/assessments/a1`);
@@ -132,18 +161,17 @@ describe('firestore.rules — TrainingSessions (inkrementell, dann unveränderli
   const inProgress = { ...session, status: 'in-progress' };
   const completed = { ...session, status: 'completed' };
 
-  /** Dokument unter Umgehung der Rules seeden (reines Test-Setup). */
-  async function seed(path: string, data: Record<string, unknown>) {
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(doc(ctx.firestore(), path), data);
-    });
-  }
-
-  it('Betreuer darf eine Trainingssitzung anlegen und lesen', async () => {
+  it('Betreuer darf eine Trainingssitzung mit Server-Timestamp anlegen und lesen', async () => {
     const db = asUser(ALICE);
     const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
-    await assertSucceeds(setDoc(ref, inProgress));
+    await assertSucceeds(setDoc(ref, { ...inProgress, timestamp: serverTimestamp() }));
     await assertSucceeds(getDoc(ref));
+  });
+
+  it('Erstellen einer Trainingssitzung ohne Server-Timestamp schlägt fehl', async () => {
+    const db = asUser(ALICE);
+    const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
+    await assertFails(setDoc(ref, inProgress));
   });
 
   it('laufende Sitzung (in-progress) darf inkrementell aktualisiert werden', async () => {
@@ -165,11 +193,35 @@ describe('firestore.rules — TrainingSessions (inkrementell, dann unveränderli
     await assertSucceeds(updateDoc(ref, { status: 'completed' }));
   });
 
+  it('Ändern von sessionDay, ageGroupAtTest oder rngSeed bei laufenden Sitzungen schlägt fehl', async () => {
+    await seed(`users/${ALICE}/children/${CHILD}/trainingSessions/t1`, inProgress);
+    const db = asUser(ALICE);
+    const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
+    await assertFails(updateDoc(ref, { sessionDay: 2 }));
+    await assertFails(updateDoc(ref, { ageGroupAtTest: 4 }));
+    await assertFails(updateDoc(ref, { rngSeed: 'tampered-seed' }));
+  });
+
+  it('Ungültiger Status-Übergang bei laufenden Sitzungen schlägt fehl', async () => {
+    await seed(`users/${ALICE}/children/${CHILD}/trainingSessions/t1`, inProgress);
+    const db = asUser(ALICE);
+    const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
+    await assertFails(updateDoc(ref, { status: 'cancelled' }));
+    await assertFails(updateDoc(ref, { status: 'archived' }));
+  });
+
+  it('Ändern des Erstellungs-Timestamps bei laufenden Sitzungen schlägt fehl', async () => {
+    await seed(`users/${ALICE}/children/${CHILD}/trainingSessions/t1`, inProgress);
+    const db = asUser(ALICE);
+    const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
+    await assertFails(updateDoc(ref, { timestamp: serverTimestamp() }));
+  });
+
   it('abgeschlossene Sitzung ist unveränderlich: Update verboten', async () => {
     await seed(`users/${ALICE}/children/${CHILD}/trainingSessions/t1`, completed);
     const db = asUser(ALICE);
     const ref = doc(db, `users/${ALICE}/children/${CHILD}/trainingSessions/t1`);
-    await assertFails(updateDoc(ref, { sessionDay: 2 }));
+    await assertFails(updateDoc(ref, { exercises: [{ exerciseId: 'maze' }] }));
   });
 
   it('Alt-Dokument ohne status-Feld bleibt gesperrt (Update verboten)', async () => {
@@ -197,12 +249,18 @@ describe('firestore.rules — TrainingSessions (inkrementell, dann unveränderli
 describe('firestore.rules — Legacy & Fremdpfade gesperrt', () => {
   it('Legacy testResults-Collection ist komplett gesperrt', async () => {
     const db = asUser(ALICE);
-    await assertFails(getDoc(doc(db, `testResults/x`)));
-    await assertFails(setDoc(doc(db, `testResults/x`), { foo: 'bar' }));
+    await assertFails(getDoc(doc(db, 'testResults/x')));
+    await assertFails(setDoc(doc(db, 'testResults/x'), { foo: 'bar' }));
   });
 
   it('Betreuer darf nicht in den Teilbaum eines anderen uid schreiben', async () => {
     const db = asUser(ALICE);
-    await assertFails(setDoc(doc(db, `users/${BOB}/children/${CHILD}`), { displayName: 'x', ageGroup: 4, archived: false }));
+    await assertFails(
+      setDoc(doc(db, `users/${BOB}/children/${CHILD}`), {
+        displayName: 'x',
+        ageGroup: 4,
+        archived: false,
+      }),
+    );
   });
 });
