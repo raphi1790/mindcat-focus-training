@@ -30,10 +30,18 @@ export function niceMax(value: number): number {
 }
 
 /** Vorzeichenbehaftete Kurzform, z. B. "−80 ms" / "+3.2 %". */
-export function formatSigned(value: number, unit: string): string {
-  const rounded = Math.round(value * 10) / 10;
+export function formatSigned(value: number, unit: string, decimals?: number): string {
+  const factor = decimals !== undefined ? 10 ** decimals : 10;
+  const rounded = Math.round(value * factor) / factor;
   const sign = rounded > 0 ? '+' : rounded < 0 ? '−' : '±';
-  return `${sign}${Math.abs(rounded)}${unit}`;
+  const formattedAbs =
+    decimals !== undefined ? Math.abs(rounded).toFixed(decimals) : String(Math.abs(rounded));
+  return `${sign}${formattedAbs}${unit}`;
+}
+
+/** Formatiert Metrikwerte für Charts und Tabellen: % mit 1 Dezimalstelle, ms gerundet ganzzahlig. */
+export function formatMetricValue(value: number, unit: string): string {
+  return unit === '%' ? `${value.toFixed(1)} %` : `${Math.round(value)} ms`;
 }
 
 /**

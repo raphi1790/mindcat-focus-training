@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Assessment, AntScores, AssessmentPhase } from '../data/schema';
-import { computeEffectSummary } from './effectSummary';
+import { computeEffectSummary, isMetricImproved } from './effectSummary';
 
 let idCounter = 0;
 
@@ -97,5 +97,29 @@ describe('computeEffectSummary', () => {
     const summary = computeEffectSummary([oldBaseline, retryBaseline, post]);
     const overall = summary!.metrics.find((m) => m.key === 'overallRT');
     expect(overall!.baseline).toBe(1500);
+  });
+});
+
+describe('isMetricImproved', () => {
+  it('wertet negative Deltas bei overallRT, conflictRT und overallErrorRate als Verbesserung', () => {
+    expect(isMetricImproved({ key: 'overallRT', delta: -50 })).toBe(true);
+    expect(isMetricImproved({ key: 'overallRT', delta: 50 })).toBe(false);
+    expect(isMetricImproved({ key: 'overallRT', delta: 0 })).toBe(false);
+
+    expect(isMetricImproved({ key: 'conflictRT', delta: -30 })).toBe(true);
+    expect(isMetricImproved({ key: 'conflictRT', delta: 30 })).toBe(false);
+
+    expect(isMetricImproved({ key: 'overallErrorRate', delta: -5 })).toBe(true);
+    expect(isMetricImproved({ key: 'overallErrorRate', delta: 5 })).toBe(false);
+  });
+
+  it('wertet positive Deltas bei alertingRT und orientingRT (Benefit) als Verbesserung', () => {
+    expect(isMetricImproved({ key: 'alertingRT', delta: 40 })).toBe(true);
+    expect(isMetricImproved({ key: 'alertingRT', delta: -40 })).toBe(false);
+    expect(isMetricImproved({ key: 'alertingRT', delta: 0 })).toBe(false);
+
+    expect(isMetricImproved({ key: 'orientingRT', delta: 25 })).toBe(true);
+    expect(isMetricImproved({ key: 'orientingRT', delta: -25 })).toBe(false);
+    expect(isMetricImproved({ key: 'orientingRT', delta: 0 })).toBe(false);
   });
 });

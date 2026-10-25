@@ -297,4 +297,62 @@ describe('ChildDashboard', () => {
 
     expect(firestoreModule.resetChildProgress).toHaveBeenCalledWith('u1', 'c1');
   });
+
+  it('zeigt Ausschlusshinweis mit korrekter Prozentzahl (ohne Faktor 100 Multiplikation)', () => {
+    vi.spyOn(useChildDashboardDataModule, 'useChildDashboardData').mockReturnValue({
+      loading: false,
+      error: null,
+      assessments: [
+        {
+          id: 'a1',
+          phase: 'baseline',
+          ageGroupAtTest: 6,
+          rngSeed: 'seed-1',
+          timestamp: new Date('2026-01-01'),
+          config: {
+            practiceTrials: 24,
+            testBlocks: 3,
+            trialsPerBlock: 48,
+            timings: {
+              fixationMinMs: 400,
+              fixationMaxMs: 1600,
+              cueMs: 150,
+              postCueFixationMs: 450,
+              targetMaxMs: 1700,
+            },
+          },
+          scores: {
+            overallRT: 1200,
+            conflictRT: 100,
+            alertingRT: 50,
+            orientingRT: 30,
+            overallErrorRate: 45.0,
+            accuracyByCondition: {},
+          },
+          quality: { excluded: true, reason: 'Fehlerrate > 40 %', validTrialCount: 80 },
+          rawTrials: [],
+        },
+      ],
+      sessions: [sampleSession],
+      effectSummary: null,
+      trainingSummary: {
+        days: [],
+        totalExercisesCompleted: 0,
+        totalDaysCompleted: 0,
+        avgTrialToAdvanceRate: null,
+        overallErrorRate: 0,
+        byExercise: [],
+      },
+      histogram: null,
+      histogramSource: null,
+      reload: vi.fn(),
+    });
+
+    render(<ChildDashboard uid="u1" child={mockChild} />);
+
+    expect(screen.getByText(/Ausschlusshinweis: Ungültiger ANT-Testlauf erkannt/i)).toBeDefined();
+    // Prüfen, dass 45.0 % angezeigt wird und NICHT 4500.0 %
+    expect(screen.getByText('45.0 %')).toBeDefined();
+    expect(screen.queryByText(/4500/)).toBeNull();
+  });
 });

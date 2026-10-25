@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Cue, Flanker, Trial } from '../../data/schema';
-import { EXCLUSION_ERROR_RATE_PERCENT, median, scoreAnt } from './scoring';
+import {
+  ANTICIPATORY_RT_THRESHOLD_MS,
+  EXCLUSION_ERROR_RATE_PERCENT,
+  MIN_VALID_RT_MS,
+  median,
+  scoreAnt,
+} from './scoring';
 
 let trialCounter = 0;
 
@@ -163,3 +169,51 @@ describe('scoreAnt — Fehlerrate & Exclusion', () => {
     expect(quality.validTrialCount).toBe(0);
   });
 });
+
+describe('scoreAnt — Antizipatorischer RT-Filter (< 200 ms)', () => {
+  const coveringCorrectTrials = (): Trial[] => [
+    makeTrial({ cue: 'none', flanker: 'congruent', rt: 1000 }),
+    makeTrial({ cue: 'double', flanker: 'incongruent', rt: 800 }),
+    makeTrial({ cue: 'central', flanker: 'congruent', rt: 900 }),
+    makeTrial({ cue: 'spatial', flanker: 'incongruent', rt: 700 }),
+    makeTrial({ cue: 'none', flanker: 'incongruent', rt: 1100 }),
+    makeTrial({ cue: 'double', flanker: 'congruent', rt: 850 }),
+  ];
+
+  it('exportiert MIN_VALID_RT_MS und ANTICIPATORY_RT_THRESHOLD_MS als 200 ms', () => {
+    expect(MIN_VALID_RT_MS).toBe(200);
+    expect(ANTICIPATORY_RT_THRESHOLD_MS).toBe(200);
+  });
+
+  it('schließt Trials mit RT < 200 ms aus den RT-Medianen und validTrialCount aus', () => {
+    const trials: Trial[] = [
+      makeTrial({ cue: 'none', flanker: 'congruent', rt: 150 }), // < 200ms antizipatorisch (ignoriert für RT)
+      ...coveringCorrectTrials(),
+    ];
+    const { scores, quality } = scoreAnt(trials);
+
+    // cue:none RT-Median darf nicht durch den 150ms-Trial verzerrt werden:
+    // Relevante cue:none Trials: 1000, 1100 -> Median 1050
+    // alerting = median(none [1050]) - median(double [800, 850 -> 825]) = 225
+    expect(scores.alertingRT).toBe(225);
+    // validTrialCount zählt nur korrekte Trials mit RT >= 200 ms (6 von 7):
+    expect(quality.validTrialCount).toBe(6);
+    expect(quality.excluded).toBe(false);
+  });
+
+  it('schließt den Lauf aus, wenn durch den < 200 ms Filter eine Bedingung keine gültigen RTs mehr hat', () => {
+    const trials: Trial[] = [
+      makeTrial({ cue: 'none', flanker: 'congruent', rt: 1000 }),
+      makeTrial({ cue: 'double', flanker: 'incongruent', rt: 800 }),
+      makeTrial({ cue: 'central', flanker: 'congruent', rt: 900 }),
+      makeTrial({ cue: 'none', flanker: 'incongruent', rt: 1100 }),
+      makeTrial({ cue: 'double', flanker: 'congruent', rt: 850 }),
+      makeTrial({ cue: 'spatial', flanker: 'incongruent', rt: 180 }), // < 200 ms -> spatial hat keine gültigen RTs!
+    ];
+    const { quality } = scoreAnt(trials);
+    expect(quality.excluded).toBe(true);
+    expect(quality.reason).toContain('cue:spatial');
+    expect(quality.validTrialCount).toBe(5);
+  });
+});
+

@@ -70,3 +70,19 @@ export function computeEffectSummary(assessments: readonly Assessment[]): Effect
 
   return { baseline, post, metrics };
 }
+
+/**
+ * Bestimmt, ob die Veränderung einer Metrik (delta = post − baseline)
+ * eine Verbesserung darstellt.
+ *
+ * Für overallRT, conflictRT und overallErrorRate ist eine Reduktion (delta < 0) besser
+ * (schnellere Verarbeitung, geringere Interferenzkosten, weniger Fehler).
+ * Für alertingRT und orientingRT (Nutzen von Hinweisreizen / Cue-Benefit)
+ * spiegelt ein Anstieg (delta > 0) eine Vergrößerung des Aufmerksamkeitsnutzens wider.
+ */
+export function isMetricImproved(metric: Pick<EffectMetric, 'key' | 'delta'>): boolean {
+  if (metric.key === 'alertingRT' || metric.key === 'orientingRT') {
+    return metric.delta > 0;
+  }
+  return metric.delta < 0;
+}
