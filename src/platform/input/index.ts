@@ -4,6 +4,7 @@ export {
   confirmPressedFromGamepad,
   connectedGamepads,
   directionFromGamepad,
+  exitComboPressedFromGamepad,
 } from './gamepad';
 export type { Axis, Choice, Direction, GamepadLike } from './gamepad';
 export { useDirectionalInput } from './useDirectionalInput';

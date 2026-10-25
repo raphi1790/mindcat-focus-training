@@ -89,6 +89,11 @@ export function choiceFromGamepad(
   return null;
 }
 
+/** Arcade-Abbruch: Buttons 0 & 1 gleichzeitig gedrückt (HoldToExit). */
+export function exitComboPressedFromGamepad(gp: GamepadLike): boolean {
+  return pressed(gp, 0) && pressed(gp, 1);
+}
+
 /** Bestätigen/Auswählen (für Navigations-Menüs, nicht für den ANT). */
 export function confirmPressedFromGamepad(gp: GamepadLike): boolean {
   return ACTION_BUTTONS.some((i) => pressed(gp, i));
