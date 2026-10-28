@@ -21,15 +21,21 @@ Das Frontend ist eine **Single Page Application (SPA)**, basierend auf:
 
 ## 2. Umgebungen & Deployment-Strategie
 
-Das Projekt unterscheidet strikt zwischen **Qualitätssicherung / Staging (`qual`)** und **Produktion (`production`)**.
+Die CI/CD-Pipeline unterstützt zwei logische Deployment-Stufen: **Qualitätssicherung / Staging (`qual`)** und **Produktion (`production`)**.
+
+> [!NOTE]
+> **Aktueller Projekt-Stand (Single-Project Setup)**:
+> Aktuell existiert in Firebase ein gemeinsames Projekt **`mindcat-focus-training`**, auf das sowohl `qual` als auch `production` deployen (konfiguriert in [`.firebaserc`](../.firebaserc) unter den Aliasen `default`, `qual` und `production`).
+> Sobald zukünftig ein separates Firebase-Projekt für Staging/Qual (z. B. `mindcat-focus-training-qual`) erstellt wird, muss lediglich der Alias `qual` in `.firebaserc` sowie die Variable `VITE_FIREBASE_PROJECT_ID` im GitHub Environment `qual` hinterlegt werden — der Workflow bleibt unverändert.
 
 | Eigenschaft | Staging / Qual (`qual`) | Produktion (`production`) |
 |---|---|---|
-| **Zweck** | Integrationstests, Abnahme, Feature-Testing | Wissenschaftliche Studien, echte Trainingsdaten |
+| **Zweck** | Integrationstests, Abnahme, Feature-Testing | Wissenschaftliche Studien, Produktiv-Release |
 | **Trigger** | Push auf Branch `main`, manuell via `workflow_dispatch` | Push eines Git-Tags `v*` (z. B. `v1.0.0`), manuell via `workflow_dispatch` |
 | **GitHub Environment** | `qual` | `production` |
+| **Firebase-Projekt (aktuell)** | `mindcat-focus-training` | `mindcat-focus-training` |
 | **Build-Kommando** | `npm run build:qual` (`--mode qual`) | `npm run build:prod` (`--mode production`) |
-| **Standard-URL** | `https://mindcat-focus-training-qual.web.app` | `https://mindcat-focus-training.web.app` |
+| **Standard-URL** | `https://mindcat-focus-training.web.app` | `https://mindcat-focus-training.web.app` |
 | **Deploy-Ziel** | Hosting + Firestore Rules | Hosting + Firestore Rules |
 
 ---
