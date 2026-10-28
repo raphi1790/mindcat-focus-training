@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "mindcat-focus-training"
+    "default": "mindcat-focus-training",
+    "qual": "mindcat-focus-training",
+    "production": "mindcat-focus-training"
   }
 }
