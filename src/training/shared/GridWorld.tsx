@@ -123,7 +123,7 @@ export default function GridWorld({
       cells.push(
         <div
           key={`${x}-${y}`}
-          className={`w-full h-full border border-slate-200/20 flex items-center justify-center text-2xl sm:text-3xl transition-all duration-200 ${tileClass}`}
+          className={`w-full h-full min-w-0 min-h-0 overflow-hidden border border-slate-200/20 flex items-center justify-center text-2xl sm:text-3xl transition-all duration-200 ${tileClass}`}
         >
           {decal && <span className="animate-pop">{decal}</span>}
         </div>,
@@ -149,7 +149,10 @@ export default function GridWorld({
       >
         <div
           className="grid w-full h-full"
-          style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}
+          style={{
+            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+          }}
         >
           {cells}
         </div>

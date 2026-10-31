@@ -246,4 +246,80 @@ describe('Anticipation — Positionspersistenz der Katze über Trials (Issue #14
   });
 });
 
+describe('Anticipation — Spalten-Deckungsgleichheit & stabiler Level-Übergang während Flash (Issue #41)', () => {
+  it('aboveGrid und GridWorld nutzen identisches minmax(0, 1fr) Spalten-Template und min-w-0 auf allen Spur-Zellen (Level 1 & Level 4)', () => {
+    for (const [level, expectedLanes] of [
+      [1, 5],
+      [4, 7],
+    ] as const) {
+      const { container, unmount } = renderExercise(level);
+      const laneCells = Array.from(container.querySelectorAll<HTMLElement>('.aspect-\\[3\\/1\\]'));
+      expect(laneCells.length).toBe(expectedLanes);
+
+      for (const cell of laneCells) {
+        expect(cell.className).toContain('min-w-0');
+        expect(cell.className).toContain('overflow-hidden');
+        expect(cell.className).not.toContain('rounded-xl');
+      }
+
+      const aboveGridEl = laneCells[0]?.parentElement;
+      expect(aboveGridEl?.style.gridTemplateColumns).toBe(`repeat(${expectedLanes}, minmax(0, 1fr))`);
+      expect(aboveGridEl?.className).toContain('border-4');
+      expect(aboveGridEl?.className).not.toContain('gap-2');
+
+      const gridWorldInner = container.querySelector<HTMLElement>('.aspect-square > .grid');
+      expect(gridWorldInner?.style.gridTemplateColumns).toBe(`repeat(${expectedLanes}, minmax(0, 1fr))`);
+      expect(gridWorldInner?.children.length).toBe(expectedLanes);
+      for (const tile of Array.from(gridWorldInner?.children ?? [])) {
+        expect((tile as HTMLElement).className).toContain('min-w-0');
+      }
+
+      unmount();
+    }
+  });
+
+  it('hält beim Level-Up von Level 3 auf Level 4 während der 500ms Flash-Phase die 5 Spuren und die getroffene Zielspur stabil und wechselt erst nach Flash-Ende auf 7 Spuren', () => {
+    // Starte in Level 3 mit streak = 2 (nächster Treffer löst Level-Up auf Level 4 aus)
+    const initialState = { ...createExerciseProgress(), level: 3, streak: 2 };
+    const { container } = render(
+      <StrictMode>
+        <AnticipationVisible ageGroup={4} seed={SEED} initialState={initialState} onComplete={() => {}} onCancel={() => {}} />
+      </StrictMode>,
+    );
+
+    const target = targetLaneForTrial0(SEED);
+    const travelMsL3 = travelMsForLevel(3);
+
+    // Katze von Spur 2 in die Zielspur bewegen
+    const key = target > HOME_LANE ? 'ArrowRight' : 'ArrowLeft';
+    for (let i = 0; i < Math.abs(target - HOME_LANE); i++) press(key);
+
+    // Bis zum Auftauchen der Ente vorspulen -> Treffer & Level-Up auf Level 4, Flash (500ms) startet
+    act(() => {
+      vi.advanceTimersByTime(travelMsL3);
+    });
+
+    // Während der 500ms Flash-Phase müssen noch 5 Spuren gerendert werden (kein verfrühter Sprung auf 7 Spuren!)
+    expect(container.querySelectorAll('.aspect-\\[3\\/1\\]').length).toBe(5);
+    expect(container.querySelectorAll('.aspect-square > .grid > div').length).toBe(5);
+    // Und die aufgetauchte Ente in der getroffenen Zielspur bleibt während des Jubels sichtbar
+    const laneCellsDuringFlash = container.querySelectorAll('.aspect-\\[3\\/1\\]');
+    expect(laneCellsDuringFlash[target]?.textContent).toContain('🦆');
+
+    // Nach 400ms (immer noch im 500ms Flash): weiterhin 5 Spuren
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(container.querySelectorAll('.aspect-\\[3\\/1\\]').length).toBe(5);
+
+    // Nach Ablauf der restlichen 100ms (insgesamt 500ms FLASH_MS): Übergang auf 7 Spuren für den neuen Trial in Level 4
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(container.querySelectorAll('.aspect-\\[3\\/1\\]').length).toBe(7);
+    expect(container.querySelectorAll('.aspect-square > .grid > div').length).toBe(7);
+  });
+});
+
+
 

@@ -29,8 +29,8 @@ interface AnticipationExerciseProps extends ExerciseProps {
 export default function AnticipationExercise({ seed, visible, onComplete, onCancel, initialState, onLevelUp }: AnticipationExerciseProps) {
   const exerciseId = visible ? 'anticipation-visible' : 'anticipation-invisible';
   const { state, recordTrial } = useExerciseEngine(exerciseId, CONFIG, onComplete, { initialState, onLevelUp });
-  const [trialId, setTrialId] = useState(0);
   const initialLanes = lanesForLevel(initialState?.level ?? 1);
+  const [activeLanes, setActiveLanes] = useState(initialLanes);
   const [lane, setLane] = useState(() => Math.floor(initialLanes / 2));
   const [targetLane, setTargetLane] = useState(0);
   const [phase, setPhase] = useState<Phase>('approaching');
@@ -60,8 +60,11 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
   }, [endTrial]);
 
   // Neuer Trial: Zielspur wählen, Anflug- und Auftauch-Timer starten.
+  // Während der 500ms Flash-Phase darf kein neuer Trial starten, damit Spur-Anzahl
+  // (z. B. beim Level-Up 3 -> 4 von 5 auf 7 Spuren) und getroffene Zielspur während
+  // der Erfolgsanimation stabil bleiben.
   useEffect(() => {
-    if (state.done) return;
+    if (state.done || flash !== null) return;
 
     // Eigene Rng-Instanz je Trial (AP3) — siehe Begründung in ChaseExercise.tsx.
     const trialRng = createTrialRng(seed, state.totalTrials);
@@ -69,6 +72,7 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
     const setupTrial = () => {
       gateRef.current.reset();
       const currentLanes = lanesForLevel(state.level);
+      setActiveLanes(currentLanes);
       const retainedCat = Math.min(Math.max(laneRef.current, 0), currentLanes - 1);
       laneRef.current = retainedCat;
       setLane(retainedCat);
@@ -107,7 +111,7 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
     }, TICK_MS);
 
     return () => clearInterval(tick);
-  }, [trialId, state.level, state.done, state.totalTrials, seed]);
+  }, [flash, state.level, state.done, state.totalTrials, seed]);
 
   const handleMove = useCallback(
     ({ dx }: { dx: number; dy: number }) => {
@@ -129,12 +133,10 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
     if (flash === null) return;
     const timeout = setTimeout(() => {
       setFlash(null);
-      setTrialId((id) => id + 1);
     }, FLASH_MS);
     return () => clearTimeout(timeout);
   }, [flash]);
 
-  const lanes = lanesForLevel(state.level);
   const travelMs = travelMsForLevel(state.level);
   const progress = Math.min(1, elapsedMs / travelMs);
   // Ente nähert sich von links außerhalb des Feldes (-1) der Zielspur an.
@@ -142,7 +144,7 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
 
   return (
     <GridWorld
-      cols={lanes}
+      cols={activeLanes}
       rows={1}
       tileAt={(x) => (phase === 'catchable' && x === targetLane ? 'target' : 'path')}
       catPos={{ x: lane, y: 0 }}
@@ -151,8 +153,11 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
       streak={{ current: state.streak, target: CONFIG.advanceStreak }}
       counter={`${state.totalTrials} / ${CONFIG.minTrials}`}
       aboveGrid={
-        <div className="mt-16 w-[90vw] max-w-[600px] grid gap-2" style={{ gridTemplateColumns: `repeat(${lanes}, 1fr)` }}>
-          {Array.from({ length: lanes }, (_, i) => {
+        <div
+          className="mt-16 w-[90vw] max-w-[600px] border-4 border-white rounded-2xl overflow-hidden shadow-lg grid"
+          style={{ gridTemplateColumns: `repeat(${activeLanes}, minmax(0, 1fr))` }}
+        >
+          {Array.from({ length: activeLanes }, (_, i) => {
             const duckApproaching = visible
               ? phase === 'approaching' && markerLane === i
               : phase === 'approaching' && elapsedMs < 800 && targetLane === i;
@@ -160,12 +165,12 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
             return (
               <div
                 key={i}
-                className="aspect-[3/1] rounded-xl flex items-center justify-center text-3xl bg-gradient-to-b from-sky-200 to-sky-300 border border-sky-300/60 shadow-inner"
+                className="aspect-[3/1] min-w-0 overflow-hidden flex items-center justify-center text-2xl sm:text-3xl leading-none bg-gradient-to-b from-sky-200 to-sky-300 border border-sky-300/60 shadow-inner"
               >
-                {duckApproaching && <span className="animate-float-slow">🦆</span>}
-                {duckSurfaced && <span className="animate-pop">🦆</span>}
+                {duckApproaching && <span className="animate-float-slow leading-none">🦆</span>}
+                {duckSurfaced && <span className="animate-pop leading-none">🦆</span>}
                 {!duckApproaching && !duckSurfaced && (
-                  <span aria-hidden className="text-xl opacity-40">
+                  <span aria-hidden className="text-2xl sm:text-3xl leading-none opacity-40">
                     🌊
                   </span>
                 )}
