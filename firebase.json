@@ -1,6 +1,13 @@
 {
+  "auth": {
+    "providers": {
+      "emailPassword": true
+    }
+  },
   "firestore": {
-    "rules": "firestore.rules"
+    "rules": "firestore.rules",
+    "database": "(default)",
+    "location": "europe-west6"
   },
   "hosting": {
     "public": "dist",

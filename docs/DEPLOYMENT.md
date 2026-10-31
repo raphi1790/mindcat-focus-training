@@ -21,13 +21,14 @@ Das Frontend ist eine **Single Page Application (SPA)**, basierend auf:
 
 ## 2. Umgebungen & Deployment-Strategie
 
-Das Projekt unterscheidet strikt zwischen **Qualitätssicherung / Staging (`qual`)** und **Produktion (`production`)**.
+Das Projekt nutzt zwei strikt getrennte Firebase-Projekte für **Qualitätssicherung / Staging (`qual`)** und **Produktion (`production`)** (konfiguriert in [`.firebaserc`](../.firebaserc)):
 
 | Eigenschaft | Staging / Qual (`qual`) | Produktion (`production`) |
 |---|---|---|
-| **Zweck** | Integrationstests, Abnahme, Feature-Testing | Wissenschaftliche Studien, echte Trainingsdaten |
+| **Zweck** | Integrationstests, Abnahme, Feature-Testing, Seed-Daten | Wissenschaftliche Studien, echte Trainingsdaten |
 | **Trigger** | Push auf Branch `main`, manuell via `workflow_dispatch` | Push eines Git-Tags `v*` (z. B. `v1.0.0`), manuell via `workflow_dispatch` |
 | **GitHub Environment** | `qual` | `production` |
+| **Firebase-Projekt** | `mindcat-focus-training-qual` | `mindcat-focus-training` |
 | **Build-Kommando** | `npm run build:qual` (`--mode qual`) | `npm run build:prod` (`--mode production`) |
 | **Standard-URL** | `https://mindcat-focus-training-qual.web.app` | `https://mindcat-focus-training.web.app` |
 | **Deploy-Ziel** | Hosting + Firestore Rules | Hosting + Firestore Rules |

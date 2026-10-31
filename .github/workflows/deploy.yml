@@ -72,13 +72,13 @@ jobs:
         run: npm run test:e2e
 
   deploy-qual:
-    name: Deploy to Staging/Qual (Hosting & Firestore Rules)
+    name: Deploy to Qual (mindcat-focus-training-qual)
     needs: test
     if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && (inputs.target == 'qual' || inputs.target == 'both'))
     runs-on: ubuntu-latest
     environment:
       name: qual
-      url: https://${{ vars.VITE_FIREBASE_PROJECT_ID || vars.FIREBASE_PROJECT_ID || 'mindcat-focus-training-qual' }}.web.app
+      url: https://${{ vars.VITE_FIREBASE_PROJECT_ID }}.web.app
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -95,44 +95,26 @@ jobs:
       - name: Build Qual Bundle
         env:
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
           VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
           VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
         run: npm run build:qual
 
-      - name: Authenticate to Google Cloud (Service Account)
+      - name: Deploy to Firebase (Qual)
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        if: env.FIREBASE_SERVICE_ACCOUNT != ''
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-
-      - name: Deploy to Firebase Hosting & Firestore Rules
-        env:
-          FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID || vars.FIREBASE_PROJECT_ID }}
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-        run: |
-          PROJECT_FLAG=""
-          if [ -n "$FIREBASE_PROJECT_ID" ]; then
-            PROJECT_FLAG="--project $FIREBASE_PROJECT_ID"
-          fi
-          if [ -n "$FIREBASE_TOKEN" ]; then
-            npx firebase-tools deploy --only hosting,firestore:rules $PROJECT_FLAG --token "$FIREBASE_TOKEN"
-          else
-            npx firebase-tools deploy --only hosting,firestore:rules $PROJECT_FLAG
-          fi
+        run: npx firebase-tools deploy --only hosting,firestore:rules --project "${{ vars.VITE_FIREBASE_PROJECT_ID }}" --token "$FIREBASE_TOKEN"
 
   deploy-prod:
-    name: Deploy to Production (Hosting & Firestore Rules)
+    name: Deploy to Production (mindcat-focus-training)
     needs: test
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && (inputs.target == 'production' || inputs.target == 'both'))
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://${{ vars.VITE_FIREBASE_PROJECT_ID || vars.FIREBASE_PROJECT_ID || 'mindcat-focus-training' }}.web.app
+      url: https://${{ vars.VITE_FIREBASE_PROJECT_ID }}.web.app
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -149,32 +131,14 @@ jobs:
       - name: Build Production Bundle
         env:
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
           VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
           VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
         run: npm run build:prod
 
-      - name: Authenticate to Google Cloud (Service Account)
+      - name: Deploy to Firebase (Production)
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        if: env.FIREBASE_SERVICE_ACCOUNT != ''
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-
-      - name: Deploy to Firebase Hosting & Firestore Rules
-        env:
-          FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID || vars.FIREBASE_PROJECT_ID }}
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-        run: |
-          PROJECT_FLAG=""
-          if [ -n "$FIREBASE_PROJECT_ID" ]; then
-            PROJECT_FLAG="--project $FIREBASE_PROJECT_ID"
-          fi
-          if [ -n "$FIREBASE_TOKEN" ]; then
-            npx firebase-tools deploy --only hosting,firestore:rules $PROJECT_FLAG --token "$FIREBASE_TOKEN"
-          else
-            npx firebase-tools deploy --only hosting,firestore:rules $PROJECT_FLAG
-          fi
+        run: npx firebase-tools deploy --only hosting,firestore:rules --project "${{ vars.VITE_FIREBASE_PROJECT_ID }}" --token "$FIREBASE_TOKEN"
