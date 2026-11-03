@@ -48,7 +48,7 @@ export default function FarmerExercise({ seed, onComplete, onCancel, initialStat
   // Ereignis, ausgelöst nach Ablauf der Flash-Anzeige), keine reine
   // Render-Ableitung.
   useEffect(() => {
-    if (state.done) return;
+    if (state.done || flash !== null) return;
 
     const setupTrial = () => {
       // Eigene Rng-Instanz je Trial (AP3) — siehe Begründung in ChaseExercise.tsx.
@@ -74,7 +74,7 @@ export default function FarmerExercise({ seed, onComplete, onCancel, initialStat
     );
 
     return () => timers.forEach(clearTimeout);
-  }, [trialId, state.level, state.done, state.totalTrials, seed]);
+  }, [trialId, state.level, state.done, state.totalTrials, flash, seed]);
 
   const handleConfirm = useCallback(() => {
     if (respondedRef.current || !trialRef.current) return;
