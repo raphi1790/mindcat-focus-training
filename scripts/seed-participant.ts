@@ -3,20 +3,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
-// 1. Load .env before initializing Firebase
-const candidateEnvPaths = [
-  path.resolve(process.cwd(), '.env'),
-  path.resolve(process.cwd(), '../../.env'),
-  path.resolve(path.dirname(new URL(import.meta.url).pathname), '../.env'),
-  path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../.env'),
-];
-for (const envPath of candidateEnvPaths) {
+// 1. Load env/.env before initializing Firebase
+const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+for (const envPath of [
+  path.resolve(process.cwd(), 'env/.env'),
+  path.resolve(process.cwd(), '../../env/.env'),
+  path.resolve(scriptDir, '../env/.env'),
+  path.resolve(scriptDir, '../../../env/.env'),
+]) {
   if (fs.existsSync(envPath)) {
     try {
       process.loadEnvFile(envPath);
       break;
     } catch {
-      // ignore unparseable or inaccessible file
+      // ignore
     }
   }
 }
