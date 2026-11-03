@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, render } from '@testing-library/react';
+import { act } from 'react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTrialRng } from '../../../platform/rng';
 import { createExerciseProgress } from '../../engine';
+import { generateStroopTrial } from './generator';
 import NumberStroopExercise from './NumberStroopExercise';
 
 beforeEach(() => {
@@ -54,5 +57,46 @@ describe('NumberStroopExercise (AP5)', () => {
     );
 
     expect(container.textContent).not.toContain('🍎');
+  });
+
+  it('behält die Zahlen der aktuellen Runde während der 500ms Feedback-Phase bei und wechselt erst danach', () => {
+    const seed = 'stroop-flash-seed';
+    const trial0 = generateStroopTrial(createTrialRng(seed, 0), 3);
+    const trial1 = generateStroopTrial(createTrialRng(seed, 1), 3);
+    const expectedText0 = `${String(trial0.left.symbol).repeat(trial0.left.count)}vs${String(trial0.right.symbol).repeat(trial0.right.count)}`;
+    const expectedText1 = `${String(trial1.left.symbol).repeat(trial1.left.count)}vs${String(trial1.right.symbol).repeat(trial1.right.count)}`;
+    expect(expectedText0).not.toBe(expectedText1);
+
+    const { container } = render(
+      <NumberStroopExercise
+        ageGroup={4}
+        seed={seed}
+        initialState={{ ...createExerciseProgress(), level: 3 }}
+        onComplete={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(container.textContent).toContain(expectedText0);
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    });
+
+    // Unmittelbar nach Tastendruck und während der 500ms-Feedback-Phase bleibt Runde 0 sichtbar
+    expect(container.textContent).toContain(expectedText0);
+    expect(container.textContent).not.toContain(expectedText1);
+
+    act(() => {
+      vi.advanceTimersByTime(499);
+    });
+    expect(container.textContent).toContain(expectedText0);
+    expect(container.textContent).not.toContain(expectedText1);
+
+    // Nach Ablauf von FLASH_MS (500ms) erscheint Runde 1
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(container.textContent).toContain(expectedText1);
   });
 });

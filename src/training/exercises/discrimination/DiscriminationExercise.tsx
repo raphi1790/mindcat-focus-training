@@ -66,7 +66,7 @@ export default function DiscriminationExercise({
   // Ereignis, ausgelöst nach Ablauf der Flash-Anzeige), keine reine
   // Render-Ableitung.
   useEffect(() => {
-    if (state.done) return;
+    if (state.done || flash !== null) return;
 
     const setupTrial = () => {
       gateRef.current.reset();
@@ -92,7 +92,7 @@ export default function DiscriminationExercise({
     );
 
     return () => timeouts.forEach(clearTimeout);
-  }, [trialId, state.level, state.done, state.totalTrials, hasDelay, seed]);
+  }, [trialId, state.level, state.done, state.totalTrials, flash, hasDelay, seed]);
 
   const handleSelect = useCallback(
     (index: number) => {

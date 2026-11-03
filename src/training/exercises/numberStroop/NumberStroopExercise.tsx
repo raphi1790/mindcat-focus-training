@@ -60,14 +60,14 @@ export default function NumberStroopExercise({ seed, onComplete, onCancel, initi
   // Trial (externes Ereignis, ausgelöst nach Ablauf der Flash-Anzeige), keine
   // reine Render-Ableitung.
   useEffect(() => {
-    if (state.done) return;
+    if (state.done || flash !== null) return;
     const setupTrial = () => {
       gateRef.current.reset();
       // Eigene Rng-Instanz je Trial (AP3) — siehe Begründung in ChaseExercise.tsx.
       setTrial(generateStroopTrial(createTrialRng(seed, state.totalTrials), state.level));
     };
     setupTrial();
-  }, [trialId, state.level, state.done, state.totalTrials, seed]);
+  }, [trialId, state.level, state.done, state.totalTrials, flash, seed]);
 
   const handleChoice = useCallback(
     ({ choice }: ChoiceEvent) => {
