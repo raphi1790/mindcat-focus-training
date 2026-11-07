@@ -4,7 +4,7 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExerciseResult } from '../../../data/schema';
 import MazeExercise from './MazeExercise';
-import { LEVEL_MAPS, getStartPosition } from './maps';
+import { LEVEL_MAPS, getGridSizeForLevel, getStartPosition } from './maps';
 import { createExerciseProgress } from '../../engine';
 
 /**
@@ -118,7 +118,7 @@ describe('MazeExercise — Wände blockieren statt bestrafen (AP4/Befund E)', ()
 
     const before = container.textContent;
 
-    // Level 1: direkt südlich vom Start ist eine Wand (Sackgasse) — vgl.
+    // Level 1: direkt südlich vom Start (1,1) ist eine Wand (1,2) — vgl.
     // LEVEL_MAPS[1] in maps.ts. Der Bump darf weder die Katze bewegen noch
     // den Trial beenden (kein Fehler-Flash, kein Reset).
     press(0, 1);
@@ -183,13 +183,42 @@ describe('MazeExercise — Wände blockieren statt bestrafen (AP4/Befund E)', ()
     expect(result!.rawEvents?.some((e) => e.type === 'wallBump')).toBe(true);
   }, 15000);
 
-  it('Level 6 Resume: Katze spawnt auf getStartPosition(6) = (9, 13) und NICHT in der Wand von Level 1 (7, 12)', () => {
-    expect(getStartPosition(1)).toEqual({ x: 7, y: 12 });
-    expect(getStartPosition(6)).toEqual({ x: 9, y: 13 });
-    // In LEVEL_MAPS[6] ist (7, 12) eine feste Wand (Wert 1)!
-    expect(LEVEL_MAPS[6]![12]![7]).toBe(1); // Wand!
-    // Die korrekte Startposition für Level 6 ist (9, 13) (Wert 3).
-    expect(LEVEL_MAPS[6]![13]![9]).toBe(3); // Start!
+  it('wechselt das Raster beim Level-Up erst nach Ablauf des 500ms-Erfolgs-Flashs (7×7 → 9×9)', () => {
+    const initialState = { ...createExerciseProgress(6), level: 2 };
+    const { container } = render(
+      <MazeExercise
+        ageGroup={6}
+        seed="ap4-test-seed"
+        initialState={initialState}
+        onComplete={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    const grid = container.querySelector('.grid') as HTMLElement;
+    expect(grid.children).toHaveLength(7 * 7);
+
+    // Level 2 bis zum Ziel durchlaufen -> löst Level-Up auf Level 3 (9×9) und Flash ('success') aus
+    for (const step of findPath(LEVEL_MAPS[2]!)) {
+      press(step.dx, step.dy);
+    }
+
+    // Während des 500ms-Flashs muss noch das 7×7-Raster von Level 2 sichtbar bleiben
+    expect(grid.children).toHaveLength(7 * 7);
+    expect(container.textContent).toContain('😸');
+
+    // Nach Ablauf von FLASH_MS wechselt das Raster auf 9×9 (Level 3)
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(grid.children).toHaveLength(9 * 9);
+  });
+
+  it('Level 6 Resume: rendert 11×11-Raster und spawnt Katze auf getStartPosition(6)', () => {
+    const size = getGridSizeForLevel(6);
+    expect(size).toBe(11);
+    const start = getStartPosition(6);
+    expect(start).toEqual({ x: 1, y: 1 });
 
     const initialState = { ...createExerciseProgress(6), level: 6 };
     const { container } = render(
@@ -202,22 +231,16 @@ describe('MazeExercise — Wände blockieren statt bestrafen (AP4/Befund E)', ()
       />,
     );
 
-    // GridWorld hat 15 Spalten/Zeilen -> tileW = 100/15 % = 6.6666...%
-    // Start (9, 13) -> left: 60%, top: 86.666...%
-    // Wand (7, 12) -> left: 46.666...%, top: 80%
-    const tileW = 100 / 15;
-    const startLeft = `${9 * tileW}%`;
-    const startTop = `${13 * tileW}%`;
-    const wallLeft = `${7 * tileW}%`;
-    const wallTop = `${12 * tileW}%`;
+    const grid = container.querySelector('.grid') as HTMLElement;
+    expect(grid.children).toHaveLength(11 * 11);
 
-    const wallCat = container.querySelector(`[style*="left: ${wallLeft}"][style*="top: ${wallTop}"]`);
-    expect(wallCat).toBeNull();
+    const tileW = 100 / size;
+    const startLeft = `${start.x * tileW}%`;
+    const startTop = `${start.y * tileW}%`;
 
     const startCat = container.querySelector(`[style*="left: ${startLeft}"][style*="top: ${startTop}"]`);
     expect(startCat).not.toBeNull();
     expect(startCat?.textContent).toContain('🐱');
-
     expect(container.textContent).toContain('Level 6');
   });
 });
