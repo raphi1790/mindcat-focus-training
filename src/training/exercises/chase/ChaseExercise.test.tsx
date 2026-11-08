@@ -4,7 +4,7 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTrialRng } from '../../../platform/rng';
 import { createExerciseProgress } from '../../engine/exerciseProgress';
-import { type Pos } from './collision';
+import { stepIntervalForLevel, type Pos } from './collision';
 import ChaseExercise from './ChaseExercise';
 
 /**
@@ -202,6 +202,46 @@ describe('ChaseExercise — Schirm-Schritt-Kollision & AP2', () => {
     );
 
     expect(container.textContent).toContain('⚡');
+  });
+
+  it('setzt die Katze beim Catch sichtbar für 500ms auf das Zielfeld des Regenschirms bevor der nächste Trial startet (Issue #44)', () => {
+    // Schirm steht auf (5, 4) — direkt rechts von der Katze (4, 4)
+    const seed = findSeedForTarget((pos) => pos.x === 5 && pos.y === 4);
+
+    const { container } = render(
+      <ChaseExercise ageGroup={4} seed={seed} onComplete={() => {}} onCancel={() => {}} />,
+    );
+
+    // Katze bewegt sich diagonal (dx: 1, dy: 1) und fängt den Schirm auf (5, 4) via Swept-Volume
+    pressDirection(1, 1);
+
+    // Während der 500ms Feierphase (flash === 'success') zeigt die Katze '😸'
+    // und sitzt sichtbar auf dem Feld des Regenschirms (5, 4) statt auf (4, 4) zurückzuspringen:
+    const catSpanDuringFlash = Array.from(container.querySelectorAll('span')).find(
+      (el) => el.textContent === '😸',
+    );
+    expect(catSpanDuringFlash).toBeDefined();
+    const catWrapperDuringFlash = catSpanDuringFlash?.parentElement;
+    // Bei 8x8 Gitter ist tileW = 12.5%; x=5 -> left: 62.5%, y=4 -> top: 50%
+    expect(catWrapperDuringFlash?.style.left).toBe('62.5%');
+    expect(catWrapperDuringFlash?.style.top).toBe('50%');
+
+    // Erst nach Ablauf der 500ms FLASH_MS startet der nächste Trial und setzt die Katze auf (4, 4) (50%, 50%) zurück:
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    const catSpanAfterFlash = Array.from(container.querySelectorAll('span')).find(
+      (el) => el.textContent === '🐱',
+    );
+    const catWrapperAfterFlash = catSpanAfterFlash?.parentElement;
+    expect(catWrapperAfterFlash?.style.left).toBe('50%');
+    expect(catWrapperAfterFlash?.style.top).toBe('50%');
+  });
+
+  it('verkürzt das Schritt-Intervall über die Levels spürbar (Issue #44)', () => {
+    expect(stepIntervalForLevel(1)).toBe(700);
+    expect(stepIntervalForLevel(4)).toBe(475);
+    expect(stepIntervalForLevel(7)).toBe(250);
   });
 });
 

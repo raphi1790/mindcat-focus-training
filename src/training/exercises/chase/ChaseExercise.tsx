@@ -5,13 +5,14 @@ import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
-import { checkChaseCollision, type Pos } from './collision';
+import { checkChaseCollision, stepIntervalForLevel, stepUmbrella, type Pos } from './collision';
 
 /**
  * Chase (Plan §6.2, Übung 2): Verfolgung/Sustained Attention. a=7, b=21, c=3.
- * Ein Regenschirm macht in festem Intervall einen Zufallsschritt; die Katze
- * muss ihn innerhalb eines Pro-Trial-Zeitfensters erreichen. Level ↑ = kürzeres
- * Zeitfenster und schnellere Schirm-Schritte (Gittergröße bleibt konstant).
+ * Ein Regenschirm macht in festem Intervall einen Schritt (mit Level-abhängigem
+ * Flucht-Bias); die Katze muss ihn innerhalb eines Pro-Trial-Zeitfensters
+ * erreichen. Level ↑ = kürzeres Zeitfenster, schnellere Schirm-Schritte und
+ * höherer Flucht-Bias (Gittergröße bleibt konstant).
  */
 const CONFIG = EXERCISE_CONFIGS.chase;
 const GRID_SIZE = 8;
@@ -26,10 +27,6 @@ function timeLimitForLevel(level: number): number {
   return Math.max(4200, 9000 - (level - 1) * 800);
 }
 
-function stepIntervalForLevel(level: number): number {
-  return Math.max(400, 700 - (level - 1) * 50);
-}
-
 function randomPos(rng: Rng, exclude: Pos): Pos {
   let pos: Pos;
   let guard = 0;
@@ -38,26 +35,6 @@ function randomPos(rng: Rng, exclude: Pos): Pos {
     guard += 1;
   } while (pos.x === exclude.x && pos.y === exclude.y && guard < 20);
   return pos;
-}
-
-const STEP_OPTIONS: Pos[] = [
-  { x: 0, y: -1 },
-  { x: 0, y: 1 },
-  { x: -1, y: 0 },
-  { x: 1, y: 0 },
-  { x: -1, y: -1 },
-  { x: 1, y: -1 },
-  { x: -1, y: 1 },
-  { x: 1, y: 1 },
-  { x: 0, y: 0 },
-];
-
-function stepRandomly(rng: Rng, pos: Pos): Pos {
-  const choice = rng.pick(STEP_OPTIONS);
-  return {
-    x: Math.min(Math.max(pos.x + choice.x, 0), GRID_SIZE - 1),
-    y: Math.min(Math.max(pos.y + choice.y, 0), GRID_SIZE - 1),
-  };
 }
 
 export default function ChaseExercise({ seed, onComplete, onCancel, initialState, onLevelUp }: ExerciseProps) {
@@ -101,7 +78,7 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
 
   // Neuer Trial: Positionen setzen, Schirm-Schritt- und Zeitlimit-Timer starten.
   useEffect(() => {
-    if (state.done) return;
+    if (state.done || flash !== null) return;
 
     // Eigene Rng-Instanz je Trial (AP3): Trial `state.totalTrials` ist damit
     // für jedes Kind identisch, unabhängig davon, wie viele Schirm-Schritte
@@ -130,14 +107,15 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
     const stepMs = stepIntervalForLevel(state.level);
     const stepInterval = setInterval(() => {
       const prev = targetPosRef.current;
-      const next = stepRandomly(trialRng, prev);
+      const cat = catPosRef.current;
+      const next = stepUmbrella(prev, cat, state.level, trialRng, GRID_SIZE);
       prevTargetPosRef.current = prev;
       targetPosRef.current = next;
       setTargetPos(next);
 
-      const cat = catPosRef.current;
       const prevCat = prevCatPosRef.current;
       if (checkChaseCollision(prevCat, cat, prev, next)) {
+        updateCatPos(next);
         endTrialRef.current(true);
       }
     }, stepMs);
@@ -157,7 +135,7 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
       clearInterval(stepInterval);
       clearInterval(tickInterval);
     };
-  }, [trialId, state.level, state.done, state.totalTrials, seed]);
+  }, [trialId, state.level, state.done, state.totalTrials, seed, flash, updateCatPos]);
 
   const handleMove = useCallback(
     ({ dx, dy }: { dx: number; dy: number }) => {
@@ -167,13 +145,15 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
         x: Math.min(Math.max(prev.x + dx, 0), GRID_SIZE - 1),
         y: Math.min(Math.max(prev.y + dy, 0), GRID_SIZE - 1),
       };
-      updateCatPos(next);
 
       const target = targetPosRef.current;
       const prevTarget = prevTargetPosRef.current;
       if (checkChaseCollision(prev, next, prevTarget, target)) {
+        updateCatPos(target);
         endTrialRef.current(true);
+        return;
       }
+      updateCatPos(next);
     },
     [flash, updateCatPos],
   );

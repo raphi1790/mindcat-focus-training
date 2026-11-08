@@ -1,4 +1,92 @@
+import type { Rng } from '../../../platform/rng';
+
 export type Pos = { x: number; y: number };
+
+const MOVE_DIRECTIONS: readonly Pos[] = [
+  { x: 0, y: -1 },
+  { x: 0, y: 1 },
+  { x: -1, y: 0 },
+  { x: 1, y: 0 },
+  { x: -1, y: -1 },
+  { x: 1, y: -1 },
+  { x: -1, y: 1 },
+  { x: 1, y: 1 },
+];
+
+const LEVEL_1_STEP_OPTIONS: readonly Pos[] = [...MOVE_DIRECTIONS, { x: 0, y: 0 }];
+
+export const FLEE_PROBABILITY_BY_LEVEL: Record<number, number> = {
+  1: 0,
+  2: 0.25,
+  3: 0.45,
+  4: 0.6,
+  5: 0.75,
+  6: 0.85,
+  7: 0.95,
+};
+
+export function fleeProbabilityForLevel(level: number): number {
+  const clamped = Math.min(Math.max(Math.floor(level), 1), 7);
+  return FLEE_PROBABILITY_BY_LEVEL[clamped] ?? 0;
+}
+
+export function stepIntervalForLevel(level: number): number {
+  return Math.max(220, 700 - (level - 1) * 75);
+}
+
+function distSq(a: Pos, b: Pos): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
+/**
+ * Berechnet den nächsten Schritt des Regenschirms (Issue #44).
+ * - Level 1: 0 % Flucht-Bias, zufällige Wahl inkl. Stillstand {0, 0}.
+ * - Ab Level 2: Kein Stillstand mehr (nur echte Schritte innerhalb des Gitters)
+ *   und steigende Flucht-Wahrscheinlichkeit (Flee-Bias), bei der Felder gewählt
+ *   werden, die die Distanz zur Katze vergrößern bzw. maximal halten.
+ */
+export function stepUmbrella(
+  pos: Pos,
+  catPos: Pos,
+  level: number,
+  rng: Rng,
+  gridSize = 8,
+): Pos {
+  if (level <= 1) {
+    const choice = rng.pick(LEVEL_1_STEP_OPTIONS);
+    return {
+      x: Math.min(Math.max(pos.x + choice.x, 0), gridSize - 1),
+      y: Math.min(Math.max(pos.y + choice.y, 0), gridSize - 1),
+    };
+  }
+
+  const validNeighbors: Pos[] = [];
+  for (const d of MOVE_DIRECTIONS) {
+    const nx = pos.x + d.x;
+    const ny = pos.y + d.y;
+    if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
+      validNeighbors.push({ x: nx, y: ny });
+    }
+  }
+
+  if (validNeighbors.length === 0) return pos;
+
+  const fleeProb = fleeProbabilityForLevel(level);
+  if (rng.next() < fleeProb) {
+    const currentDist = distSq(pos, catPos);
+    const increasing = validNeighbors.filter((n) => distSq(n, catPos) > currentDist);
+    if (increasing.length > 0) {
+      return rng.pick(increasing);
+    }
+    const maxDist = Math.max(...validNeighbors.map((n) => distSq(n, catPos)));
+    const best = validNeighbors.filter((n) => distSq(n, catPos) === maxDist);
+    return rng.pick(best);
+  }
+
+  return rng.pick(validNeighbors);
+}
 
 /**
  * Kontinuierliche Kollisionserkennung zwischen Katze und Schirm (Issue #12).
