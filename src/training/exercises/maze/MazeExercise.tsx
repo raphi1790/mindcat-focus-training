@@ -5,7 +5,7 @@ import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld, { type GridTileKind } from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
-import { GRID_SIZE, LEVEL_MAPS, getStartPosition } from './maps';
+import { LEVEL_MAPS, getStartPosition } from './maps';
 
 /** Maze (Plan §6.2, Übung 3): Antizipation/Planung. a=6, b=6, c=1. */
 const CONFIG = EXERCISE_CONFIGS.maze;
@@ -24,12 +24,18 @@ export default function MazeExercise({ onComplete, onCancel, initialState, onLev
     initialState,
     onLevelUp,
   });
+  const [displayLevel, setDisplayLevel] = useState(() => initialState?.level ?? 1);
   const [catPos, setCatPos] = useState(() => getStartPosition(initialState?.level ?? 1));
   const [flash, setFlash] = useState<'success' | null>(null);
   const [bumpSeq, setBumpSeq] = useState(0);
   const gateRef = useRef(createTrialGate());
 
-  const map = LEVEL_MAPS[state.level] ?? LEVEL_MAPS[1]!;
+  // Während des 500ms-Erfolgs-Flashs bleibt das abgeschlossene Labyrinth sichtbar,
+  // damit das Raster nicht vorzeitig umspringt und die Katze während des Jubelns
+  // nicht in einer Wand des neuen Levels steht.
+  const activeLevel = flash !== null ? displayLevel : state.level;
+  const map = LEVEL_MAPS[activeLevel] ?? LEVEL_MAPS[1]!;
+  const gridSize = map.length;
 
   // Trial endet ausschließlich mit Erreichen des Ziels (Befund E/AP4): Wände
   // blockieren nur die Bewegung, sie zählen nicht mehr als Fehler.
@@ -41,10 +47,10 @@ export default function MazeExercise({ onComplete, onCancel, initialState, onLev
 
   const handleBump = useCallback(
     (x: number, y: number) => {
-      logEvent({ type: 'wallBump', level: state.level, x, y, ts: now() });
+      logEvent({ type: 'wallBump', level: activeLevel, x, y, ts: now() });
       setBumpSeq((n) => n + 1);
     },
-    [logEvent, state.level],
+    [logEvent, activeLevel],
   );
 
   const handleMove = useCallback(
@@ -52,7 +58,7 @@ export default function MazeExercise({ onComplete, onCancel, initialState, onLev
       if (flash !== null) return;
       const nx = catPos.x + dx;
       const ny = catPos.y + dy;
-      if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) return;
+      if (nx < 0 || nx >= gridSize || ny < 0 || ny >= gridSize) return;
 
       const tile = map[ny]?.[nx];
       if (tile === 1) {
@@ -63,7 +69,7 @@ export default function MazeExercise({ onComplete, onCancel, initialState, onLev
       setCatPos({ x: nx, y: ny });
       if (tile === 2) handleTrialEnd();
     },
-    [catPos, map, flash, handleBump, handleTrialEnd],
+    [catPos, gridSize, map, flash, handleBump, handleTrialEnd],
   );
 
   useDirectionalInput(handleMove, {
@@ -76,6 +82,7 @@ export default function MazeExercise({ onComplete, onCancel, initialState, onLev
     if (flash === null) return;
     const timeout = setTimeout(() => {
       setFlash(null);
+      setDisplayLevel(state.level);
       setCatPos(getStartPosition(state.level));
       gateRef.current.reset();
     }, FLASH_MS);
@@ -84,8 +91,8 @@ export default function MazeExercise({ onComplete, onCancel, initialState, onLev
 
   return (
     <GridWorld
-      cols={GRID_SIZE}
-      rows={GRID_SIZE}
+      cols={gridSize}
+      rows={gridSize}
       tileAt={(x, y) => tileKind(map[y]?.[x] ?? 0)}
       tileEmoji={(x, y) => (tileKind(map[y]?.[x] ?? 0) === 'target' ? '🌿' : null)}
       catPos={catPos}

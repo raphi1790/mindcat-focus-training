@@ -1,32 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { GRID_SIZE, LEVEL_MAPS, getStartPosition } from './maps';
+import { GOAL_POS, LEVEL_MAPS, START_POS, getGridSizeForLevel, getStartPosition } from './maps';
 
-function isSolvable(map: number[][]): boolean {
-  let start: [number, number] | null = null;
-  let target: [number, number] | null = null;
-  for (let y = 0; y < map.length; y++) {
-    for (let x = 0; x < (map[y]?.length ?? 0); x++) {
-      if (map[y]?.[x] === 3) start = [x, y];
-      if (map[y]?.[x] === 2) target = [x, y];
-    }
-  }
-  if (!start || !target) return false;
+function isSolvableFromStartToGoal(
+  map: number[][],
+  start: { x: number; y: number },
+  goal: { x: number; y: number },
+): boolean {
+  const size = map.length;
+  if (start.y < 0 || start.y >= size || start.x < 0 || start.x >= (map[start.y]?.length ?? 0)) return false;
+  if (goal.y < 0 || goal.y >= size || goal.x < 0 || goal.x >= (map[goal.y]?.length ?? 0)) return false;
+  if (map[start.y]?.[start.x] === 1 || map[goal.y]?.[goal.x] === 1) return false;
 
-  const seen = new Set<string>([`${start[0]},${start[1]}`]);
-  const queue: [number, number][] = [start];
+  const seen = new Set<string>([`${start.x},${start.y}`]);
+  const queue: [number, number][] = [[start.x, start.y]];
+  const dirs: [number, number][] = [
+    [0, 1],
+    [0, -1],
+    [1, 0],
+    [-1, 0],
+  ];
+
   while (queue.length > 0) {
     const [x, y] = queue.shift()!;
-    if (x === target[0] && y === target[1]) return true;
-    const dirs: [number, number][] = [
-      [0, 1],
-      [0, -1],
-      [1, 0],
-      [-1, 0],
-    ];
+    if (x === goal.x && y === goal.y) return true;
     for (const [dx, dy] of dirs) {
       const nx = x + dx;
       const ny = y + dy;
-      if (ny < 0 || ny >= map.length || nx < 0 || nx >= (map[ny]?.length ?? 0)) continue;
+      if (ny < 0 || ny >= size || nx < 0 || nx >= (map[ny]?.length ?? 0)) continue;
       if (map[ny]?.[nx] === 1) continue;
       const key = `${nx},${ny}`;
       if (seen.has(key)) continue;
@@ -37,61 +37,69 @@ function isSolvable(map: number[][]): boolean {
   return false;
 }
 
-describe('Maze — Level-Karten', () => {
-  it('hat genau 6 Level (a=6), alle GRID_SIZE × GRID_SIZE groß', () => {
+describe('Maze — Level-Karten (progressives Raster nach Rueda et al., 2005)', () => {
+  const EXPECTED_SIZES: Record<number, number> = {
+    1: 7,
+    2: 7,
+    3: 9,
+    4: 9,
+    5: 11,
+    6: 11,
+  };
+
+  it('hat genau 6 Level (a=6) mit progressiv wachsenden quadratischen Rastern (7×7, 9×9, 11×11)', () => {
     const levels = Object.keys(LEVEL_MAPS).map(Number);
     expect(levels).toEqual([1, 2, 3, 4, 5, 6]);
+
     for (const level of levels) {
+      const expectedSize = EXPECTED_SIZES[level]!;
       const map = LEVEL_MAPS[level]!;
-      expect(map).toHaveLength(GRID_SIZE);
-      for (const row of map) expect(row).toHaveLength(GRID_SIZE);
-    }
-  });
-
-  it('jedes Level hat genau ein Start- und ein Ziel-Tile', () => {
-    for (const [level, map] of Object.entries(LEVEL_MAPS)) {
-      const flat = map.flat();
-      expect(flat.filter((v) => v === 3), `Level ${level}`).toHaveLength(1);
-      expect(flat.filter((v) => v === 2), `Level ${level}`).toHaveLength(1);
-    }
-  });
-
-  it('jedes Level ist vom Start zum Ziel lösbar', () => {
-    for (const [level, map] of Object.entries(LEVEL_MAPS)) {
-      expect(isSolvable(map), `Level ${level} sollte lösbar sein`).toBe(true);
-    }
-  });
-
-  it('getStartPosition findet das Start-Tile jedes Levels', () => {
-    for (const [level, map] of Object.entries(LEVEL_MAPS)) {
-      const pos = getStartPosition(Number(level));
-      expect(map[pos.y]?.[pos.x]).toBe(3);
-    }
-  });
-
-  it('Level 1–3 haben durchgehend mindestens 2 Felder breite Korridore (AP3)', () => {
-    const isWalkable = (map: number[][], x: number, y: number) => {
-      if (y < 0 || y >= map.length || x < 0 || x >= (map[y]?.length ?? 0)) return false;
-      return map[y]![x] !== 1;
-    };
-
-    const has2TileCorridors = (map: number[][]) => {
-      for (let y = 0; y < map.length; y++) {
-        for (let x = 0; x < (map[y]?.length ?? 0); x++) {
-          if (!isWalkable(map, x, y)) continue;
-          const hasHorizontal = isWalkable(map, x - 1, y) || isWalkable(map, x + 1, y);
-          const hasVertical = isWalkable(map, x, y - 1) || isWalkable(map, x, y + 1);
-          if (!hasHorizontal || !hasVertical) return false;
-        }
+      expect(getGridSizeForLevel(level), `Level ${level} gridSize`).toBe(expectedSize);
+      expect(map, `Level ${level} rows`).toHaveLength(expectedSize);
+      for (const row of map) {
+        expect(row, `Level ${level} cols`).toHaveLength(expectedSize);
       }
-      return true;
-    };
+    }
+  });
 
-    expect(has2TileCorridors(LEVEL_MAPS[1]!), 'Level 1 hat 2-Feld-breite Korridore').toBe(true);
-    expect(has2TileCorridors(LEVEL_MAPS[2]!), 'Level 2 hat 2-Feld-breite Korridore').toBe(true);
-    expect(has2TileCorridors(LEVEL_MAPS[3]!), 'Level 3 hat 2-Feld-breite Korridore').toBe(true);
+  it('besitzt in jedem Level einen geschlossenen Außenrand aus Wänden (1)', () => {
+    for (const [levelStr, map] of Object.entries(LEVEL_MAPS)) {
+      const size = map.length;
+      for (let i = 0; i < size; i++) {
+        expect(map[0]![i], `Level ${levelStr} top (${i},0)`).toBe(1);
+        expect(map[size - 1]![i], `Level ${levelStr} bottom (${i},${size - 1})`).toBe(1);
+        expect(map[i]![0], `Level ${levelStr} left (0,${i})`).toBe(1);
+        expect(map[i]![size - 1], `Level ${levelStr} right (${size - 1},${i})`).toBe(1);
+      }
+    }
+  });
 
-    // Höhere Level (4–6) besitzen schmalere 1-Feld-Korridore
-    expect(has2TileCorridors(LEVEL_MAPS[4]!)).toBe(false);
+  it('jedes Level hat genau ein Start-Tile (START_POS) und ein Ziel-Tile (GOAL_POS) innerhalb des Rasters', () => {
+    for (const [levelStr, map] of Object.entries(LEVEL_MAPS)) {
+      const level = Number(levelStr);
+      const size = map.length;
+      const goal = GOAL_POS[level]!;
+      const flat = map.flat();
+
+      expect(flat.filter((v) => v === 3), `Level ${level} Start-Tiles`).toHaveLength(1);
+      expect(flat.filter((v) => v === 2), `Level ${level} Ziel-Tiles`).toHaveLength(1);
+
+      expect(map[START_POS.y]?.[START_POS.x], `Level ${level} START_POS`).toBe(3);
+      expect(getStartPosition(level), `Level ${level} getStartPosition`).toEqual(START_POS);
+
+      expect(goal.x).toBeGreaterThanOrEqual(1);
+      expect(goal.x).toBeLessThanOrEqual(size - 2);
+      expect(goal.y).toBeGreaterThanOrEqual(1);
+      expect(goal.y).toBeLessThanOrEqual(size - 2);
+      expect(map[goal.y]?.[goal.x], `Level ${level} GOAL_POS`).toBe(2);
+    }
+  });
+
+  it('jedes Level ist per BFS von START_POS zu GOAL_POS[level] über freie Pfad-Felder (0) erreichbar', () => {
+    for (const [levelStr, map] of Object.entries(LEVEL_MAPS)) {
+      const level = Number(levelStr);
+      const goal = GOAL_POS[level]!;
+      expect(isSolvableFromStartToGoal(map, START_POS, goal), `Level ${level} sollte lösbar sein`).toBe(true);
+    }
   });
 });
