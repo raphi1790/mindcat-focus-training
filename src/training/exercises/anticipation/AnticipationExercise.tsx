@@ -5,7 +5,14 @@ import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import GridWorld from '../../shared/GridWorld';
 import type { ExerciseProps } from '../../types';
-import { catchWindowMsForLevel, lanesForLevel, pickTargetLane, travelMsForLevel } from './anticipationEngine';
+import {
+  type AnticipationPhase,
+  catchWindowMsForLevel,
+  isDuckVisibleInPond,
+  lanesForLevel,
+  pickTargetLane,
+  travelMsForLevel,
+} from './anticipationEngine';
 
 /**
  * Anticipation (Plan §6.2, Übung 4, zwei Varianten): antizipatorische
@@ -127,7 +134,7 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
     [flash, state.level],
   );
 
-  useDirectionalInput(handleMove, { enabled: flash === null && !state.done, repeatDelayMs: 180 });
+  useDirectionalInput(handleMove, { enabled: flash === null && !state.done, repeatDelayMs: 140 });
 
   useEffect(() => {
     if (flash === null) return;
@@ -139,8 +146,8 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
 
   const travelMs = travelMsForLevel(state.level);
   const progress = Math.min(1, elapsedMs / travelMs);
-  // Ente nähert sich von links außerhalb des Feldes (-1) der Zielspur an.
-  const markerLane = Math.round(-1 + progress * (targetLane + 1));
+  const duckTopPercent = phase === 'catchable' ? 82 : 8 + progress * 74;
+  const duckVisible = isDuckVisibleInPond(visible ? 'visible' : 'invisible', phase as AnticipationPhase, progress);
 
   return (
     <GridWorld
@@ -154,24 +161,60 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
       counter={`${state.totalTrials} / ${CONFIG.minTrials}`}
       aboveGrid={
         <div
+          data-testid="anticipation-lanes"
           className="mt-16 w-[90vw] max-w-[600px] border-4 border-white rounded-2xl overflow-hidden shadow-lg grid"
           style={{ gridTemplateColumns: `repeat(${activeLanes}, minmax(0, 1fr))` }}
         >
           {Array.from({ length: activeLanes }, (_, i) => {
-            const duckApproaching = visible
-              ? phase === 'approaching' && markerLane === i
-              : phase === 'approaching' && elapsedMs < 800 && targetLane === i;
-            const duckSurfaced = phase === 'catchable' && targetLane === i;
+            const isTarget = targetLane === i;
+            const showDuckHere = isTarget && duckVisible;
+            const duckSubmergedHere = isTarget && !duckVisible && phase === 'approaching';
             return (
               <div
                 key={i}
-                className="aspect-[3/1] min-w-0 overflow-hidden flex items-center justify-center text-2xl sm:text-3xl leading-none bg-gradient-to-b from-sky-200 to-sky-300 border border-sky-300/60 shadow-inner"
+                data-testid={`anticipation-lane-${i}`}
+                className="aspect-[3/1] h-44 sm:h-52 relative min-w-0 overflow-hidden flex items-center justify-center text-2xl sm:text-3xl leading-none bg-gradient-to-b from-sky-200 via-sky-300 to-cyan-400 border border-sky-300/60 shadow-inner"
               >
-                {duckApproaching && <span className="animate-float-slow leading-none">🦆</span>}
-                {duckSurfaced && <span className="animate-pop leading-none">🦆</span>}
-                {!duckApproaching && !duckSurfaced && (
-                  <span aria-hidden className="text-2xl sm:text-3xl leading-none opacity-40">
-                    🌊
+                {/* Untere Teich-/Seerosen-Abdeckung in der Unsichtbar-Variante (ab 38% bis kurz vor dem Ufer) */}
+                {!visible && (
+                  <div
+                    data-testid={`lily-cover-${i}`}
+                    aria-hidden
+                    className="absolute inset-x-0 top-[38%] bottom-[18%] bg-emerald-600/35 backdrop-blur-[2px] border-y border-emerald-400/50 flex items-center justify-center z-10 pointer-events-none"
+                  >
+                    <span className="text-lg sm:text-xl opacity-80 select-none">🌿</span>
+                  </div>
+                )}
+
+                {/* Uferkante / Ankunftszone unten in jeder Spur */}
+                <div
+                  aria-hidden
+                  className="absolute inset-x-0 bottom-0 h-[18%] bg-amber-200/50 border-t-2 border-amber-300/80 flex items-center justify-center pointer-events-none"
+                >
+                  <span className="text-sm sm:text-base opacity-45 select-none">🌊</span>
+                </div>
+
+                {/* Dezente Bläschen an der Eintauchstelle, wenn die Ente unter Wasser schwimmt */}
+                {duckSubmergedHere && (
+                  <span
+                    data-testid="duck-submerged-cue"
+                    aria-hidden
+                    className="absolute left-1/2 -translate-x-1/2 top-[34%] text-base sm:text-lg opacity-75 animate-pulse z-20 pointer-events-none"
+                  >
+                    🫧
+                  </span>
+                )}
+
+                {/* Ente schwimmt vertikal in ihrer Zielspur von oben (8%) nach unten zum Ufer (82%) */}
+                {showDuckHere && (
+                  <span
+                    data-testid="anticipation-duck"
+                    className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 transition-all duration-100 linear leading-none ${
+                      phase === 'catchable' ? 'animate-pop' : 'animate-float-slow'
+                    }`}
+                    style={{ top: `${duckTopPercent}%` }}
+                  >
+                    🦆
                   </span>
                 )}
               </div>

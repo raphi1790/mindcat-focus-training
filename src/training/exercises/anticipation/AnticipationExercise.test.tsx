@@ -4,7 +4,14 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRng, createTrialRng } from '../../../platform/rng';
 import { createExerciseProgress } from '../../engine';
-import { catchWindowMsForLevel, lanesForLevel, pickTargetLane, travelMsForLevel } from './anticipationEngine';
+import {
+  catchWindowMsForLevel,
+  INVISIBLE_VISIBLE_PROGRESS_LIMIT,
+  isDuckVisibleInPond,
+  lanesForLevel,
+  pickTargetLane,
+  travelMsForLevel,
+} from './anticipationEngine';
 import AnticipationInvisible from './AnticipationInvisible';
 import AnticipationVisible from './AnticipationVisible';
 
@@ -44,7 +51,7 @@ afterEach(() => {
 const LANES = 5;
 const HOME_LANE = 2;
 const TRAVEL_MS_L1 = 3600;
-const CATCH_WINDOW_MS_L1 = 1400;
+const CATCH_WINDOW_MS_L1 = 1600;
 const SEED = 'ap1-test-seed';
 
 /** Spiegelt pickTargetLane() aus AnticipationExercise.tsx für Trial 0. */
@@ -119,32 +126,89 @@ describe('AnticipationExercise — kein Doppelzählen unter StrictMode (AP1/Befu
   });
 });
 
-describe('AnticipationInvisible — 800 ms Einstiegs-Cue vor dem Untertauchen (AP4)', () => {
-  it('Ente ist in den ersten 800 ms sichtbar, taucht danach ab und taucht am Ende wieder auf', () => {
+describe('Anticipation — Vertikale Schwimmspuren & Sichtbarkeit (Issue #45, Rueda 2005)', () => {
+  it('Ente schwimmt in Visible durchgehend vertikal in ihrer Zielspur von oben nach unten zum Ufer', () => {
+    const target = targetLaneForTrial0(SEED);
+    const { container } = renderExercise(1);
+
+    // Zu Beginn (t = 0 ms): Ente ist genau in targetLane oben (top: 8%) sichtbar
+    const duckStart = container.querySelector<HTMLElement>('[data-testid="anticipation-duck"]');
+    expect(duckStart).not.toBeNull();
+    expect(duckStart?.style.top).toBe('8%');
+    expect(container.querySelector(`[data-testid="anticipation-lane-${target}"]`)?.textContent).toContain('🦆');
+
+    // Nach halber Schwimmzeit (t = 1800 ms, progress = 0.5): Ente ist bei top = 45% weiterhin in derselben Zielspur sichtbar
+    act(() => {
+      vi.advanceTimersByTime(TRAVEL_MS_L1 / 2);
+    });
+    const duckMid = container.querySelector<HTMLElement>('[data-testid="anticipation-duck"]');
+    expect(duckMid).not.toBeNull();
+    expect(duckMid?.style.top).toBe('45%');
+    expect(container.querySelector(`[data-testid="anticipation-lane-${target}"]`)?.textContent).toContain('🦆');
+
+    // Am Ufer angekommen (t = 3600 ms, progress = 1.0): Ente ist unten am Ufer (top: 82%)
+    act(() => {
+      vi.advanceTimersByTime(TRAVEL_MS_L1 / 2);
+    });
+    const duckArrived = container.querySelector<HTMLElement>('[data-testid="anticipation-duck"]');
+    expect(duckArrived?.style.top).toBe('82%');
+  });
+
+  it('Ente ist in Invisible im oberen Bereich (progress < 0.38) sichtbar, taucht unter die Seerosen-Abdeckung ab und taucht am Ufer wieder auf', () => {
     const { container } = render(
       <StrictMode>
         <AnticipationInvisible ageGroup={4} seed={SEED} onComplete={() => {}} onCancel={() => {}} />
       </StrictMode>,
     );
 
-    // 1. Zu Beginn (t = 0 ms < 800 ms): Einstiegs-Cue — Ente ist in der Zielspur sichtbar.
-    expect(container.textContent).toContain('🦆');
+    // 1. Zu Beginn (t = 0 ms, progress = 0 < 0.38): Ente ist in der Zielspur sichtbar, Seerosen-Abdeckung vorhanden
+    expect(container.querySelector('[data-testid="anticipation-duck"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="lily-cover-0"]')).not.toBeNull();
 
-    // 2. Nach 800 ms (t = 800 ms): Ente taucht unter.
+    // 2. Kurz nach 38% der Strecke (t = 1400 ms, progress = 1400/3600 ≈ 0.389 >= 0.38): Ente ist untergetaucht
     act(() => {
-      vi.advanceTimersByTime(800);
+      vi.advanceTimersByTime(1400);
     });
-    expect(container.textContent).not.toContain('🦆');
+    expect(isDuckVisibleInPond('invisible', 'approaching', 1400 / TRAVEL_MS_L1)).toBe(false);
+    expect(container.querySelector('[data-testid="anticipation-duck"]')).toBeNull();
+    expect(container.querySelector('[data-testid="duck-submerged-cue"]')).not.toBeNull();
 
-    // 3. Nach Ablauf der Anflugphase (t = 3600 ms): Ente taucht am Zielort wieder auf.
+    // 3. Nach Ablauf der Schwimmphase (t = 3600 ms): Ente taucht unten am Ufer wieder auf
     act(() => {
-      vi.advanceTimersByTime(TRAVEL_MS_L1 - 800);
+      vi.advanceTimersByTime(TRAVEL_MS_L1 - 1400);
     });
-    expect(container.textContent).toContain('🦆');
+    const surfacedDuck = container.querySelector<HTMLElement>('[data-testid="anticipation-duck"]');
+    expect(surfacedDuck).not.toBeNull();
+    expect(surfacedDuck?.style.top).toBe('82%');
+    expect(INVISIBLE_VISIBLE_PROGRESS_LIMIT).toBe(0.38);
+  });
+
+  it('Bewegen der Katze mit Links/Rechts während approaching löst keinen Fehlversuch aus, sondern führt bei Ankunft zum Fangen', () => {
+    const target = targetLaneForTrial0(SEED);
+    const { container } = render(
+      <StrictMode>
+        <AnticipationInvisible ageGroup={4} seed={SEED} onComplete={() => {}} onCancel={() => {}} />
+      </StrictMode>,
+    );
+
+    // Während die Ente noch schwimmt (approaching), bewegt das Kind die Katze zur Zielspur
+    const key = target > HOME_LANE ? 'ArrowRight' : 'ArrowLeft';
+    for (let i = 0; i < Math.abs(target - HOME_LANE); i++) press(key);
+
+    // Noch kein Trial beendet während approaching
+    expect(container.textContent).toContain('0 / 21');
+    expect(streakLabel(container)).toBe('0 von 3 Sternen bis zum nächsten Level');
+
+    // Sobald die Ente am Ufer ankommt, fängt die wartende Katze sie erfolgreich
+    act(() => {
+      vi.advanceTimersByTime(TRAVEL_MS_L1);
+    });
+    expect(container.textContent).toContain('1 / 21');
+    expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
   });
 });
 
-describe('Anticipation — Dynamische Spuren-Skalierung (Issue #14, Rueda 2005)', () => {
+describe('Anticipation — Dynamische Spuren-Skalierung (Issue #14 & #45, Rueda 2005)', () => {
   it('lanesForLevel liefert 5 Spuren für Level 1–3 und 7 Spuren für Level 4–7', () => {
     expect(lanesForLevel(1)).toBe(5);
     expect(lanesForLevel(2)).toBe(5);
@@ -155,11 +219,11 @@ describe('Anticipation — Dynamische Spuren-Skalierung (Issue #14, Rueda 2005)'
     expect(lanesForLevel(7)).toBe(7);
   });
 
-  it('travelMsForLevel und catchWindowMsForLevel skalieren monoton mit steigendem Level', () => {
+  it('travelMsForLevel (3600->2400ms) und catchWindowMsForLevel (1600->1000ms) skalieren erreichbar mit steigendem Level', () => {
     expect(travelMsForLevel(1)).toBe(3600);
-    expect(travelMsForLevel(7)).toBe(1500);
-    expect(catchWindowMsForLevel(1)).toBe(1400);
-    expect(catchWindowMsForLevel(7)).toBe(680);
+    expect(travelMsForLevel(7)).toBe(2400);
+    expect(catchWindowMsForLevel(1)).toBe(1600);
+    expect(catchWindowMsForLevel(7)).toBe(1000);
   });
 
   it('pickTargetLane wählt Zielspuren im gültigen Bereich [0, lanes) ungleich exclude', () => {
@@ -263,6 +327,7 @@ describe('Anticipation — Spalten-Deckungsgleichheit & stabiler Level-Übergang
       }
 
       const aboveGridEl = laneCells[0]?.parentElement;
+      expect(container.querySelector('[data-testid="anticipation-lanes"]')).toBe(aboveGridEl);
       expect(aboveGridEl?.style.gridTemplateColumns).toBe(`repeat(${expectedLanes}, minmax(0, 1fr))`);
       expect(aboveGridEl?.className).toContain('border-4');
       expect(aboveGridEl?.className).not.toContain('gap-2');
