@@ -33,10 +33,10 @@ Parameter: `a` = Anzahl Level, `b` = Mindest-Trials zum Abschluss, `c` = Kriteri
 
 | # | Übung | a | b | c | Spezifikation & Mechanik |
 |---|---|---|---|---|---|
-| 1 | **Side** | 7 | 21 | 3 | Katze auf Gras bewegen, Schlamm meiden. Offene Fläche (kein Korridor); Gras schrumpft monoton bis Level 7. |
-| 2 | **Chase** | 7 | 21 | 3 | Verfolgung: Bewegten Regenschirm fangen, um die Katze trocken zu halten. |
-| 3 | **Maze** | 6 | 6 | 1 | 4-Wege-Steuerung. Wände blockieren ohne Bestrafung (Wand-Bumps als `rawEvents`). |
-| 4 | **Anticipation** | 7 | 21 | 3 | Auftauchpunkt einer Ente vorhersagen. Varianten: sichtbar vs. unsichtbar (unter Wasser). |
+| 1 | **Side** | 7 | 21 | 3 | Katze stufenlos in der offenen `ArenaWorld` auf Gras bewegen, Schlamm meiden; Gras schrumpft monoton bis Level 7. |
+| 2 | **Chase** | 7 | 21 | 3 | Verfolgung: Katze per stufenloser 8-Wege-Bewegung unter einen vektor-gesteuerten Regenschirm führen. |
+| 3 | **Maze** | 6 | 6 | 1 | Stufenlose Labyrinth-Steuerung mit Wand-Sliding & Corner-Assist. Wände blockieren ohne Bestrafung (`wallBump` als `rawEvents`, ~300 ms Cooldown). |
+| 4 | **Anticipation** | 7 | 21 | 3 | Auftauchpunkt einer geradlinig im Winkel über den Teich schwimmenden Ente am Ufer vorhersagen (`ArenaWorld`). Varianten: durchgehend sichtbar vs. nach ~35 % unter Wasser verdeckt. |
 | 5 | **Discrimination**| 7 | 21 | 3 | Multiattribut-Portrait merken. In der Delay-Variante verschwindet die Vorlage vollständig während der Auswahl. |
 | 6 | **Number** | 5 | 45 | 9 | Arabische Ziffern aus zwei Mengen zuordnen (Symbol-Matching). |
 | 7 | **Number-Stroop** | 6 | 18 | 3 (inkongr.) | Größere Menge wählen; Konflikt zwischen Anzahl und Ziffernwert. Frühe Level mit Früchten, spätere mit Ziffern. |

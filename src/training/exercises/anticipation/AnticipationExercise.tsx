@@ -1,55 +1,72 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useDirectionalInput } from '../../../platform/input';
+import { useContinuousDirection } from '../../../platform/input';
 import { createTrialRng } from '../../../platform/rng';
 import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
-import GridWorld from '../../shared/GridWorld';
+import ArenaWorld from '../../shared/ArenaWorld';
+import { circlesOverlap, clampPos, useAnimationLoop } from '../../shared/arenaMath';
 import type { ExerciseProps } from '../../types';
 import {
   type AnticipationPhase,
+  CAT_MAX_X,
+  CAT_MIN_X,
+  CAT_RADIUS,
+  CAT_SHORE_Y,
+  CAT_SIZE,
+  CAT_SPEED,
+  DUCK_CATCH_RADIUS,
+  type DuckTrajectory,
+  INVISIBLE_VISIBLE_PROGRESS_LIMIT,
+  SHORE_TOP_Y,
   catchWindowMsForLevel,
+  duckPositionAt,
   isDuckVisibleInPond,
-  lanesForLevel,
-  pickTargetLane,
+  pickDuckTrajectory,
   travelMsForLevel,
 } from './anticipationEngine';
 
 /**
  * Anticipation (Plan §6.2, Übung 4, zwei Varianten): antizipatorische
- * Aufmerksamkeit. a=7, b=21, c=3 je Variante. Eine Ente schwimmt über
- * `travelMs` auf eine von `LANES` Spuren zu und "taucht" dort für
- * `catchWindowMs` auf — die Katze muss zu diesem Zeitpunkt in der richtigen
- * Spur stehen. `visible` steuert nur die Anzeige während der Anflugphase
- * (durchgehend sichtbare Annäherung vs. verdeckt) — die Erfolgsbedingung
- * (richtige Spur beim Auftauchen) ist in beiden Varianten identisch.
+ * Aufmerksamkeit nach Rueda et al. (2005). a=7, b=21, c=3 je Variante.
+ * Eine Ente schwimmt geradlinig mit konstantem Vektor über den Teich auf einen
+ * Zielpunkt am Ufer zu; die Katze bewegt sich stufenlos entlang des Ufers.
  */
 const CONFIG = EXERCISE_CONFIGS['anticipation-visible']; // identisch für beide Varianten
-const TICK_MS = 100;
 const FLASH_MS = 500;
-
-type Phase = 'approaching' | 'catchable';
+const INITIAL_CAT_X = 50;
 
 interface AnticipationExerciseProps extends ExerciseProps {
   visible: boolean;
 }
 
-export default function AnticipationExercise({ seed, visible, onComplete, onCancel, initialState, onLevelUp }: AnticipationExerciseProps) {
+export default function AnticipationExercise({
+  seed,
+  visible,
+  onComplete,
+  onCancel,
+  initialState,
+  onLevelUp,
+}: AnticipationExerciseProps) {
   const exerciseId = visible ? 'anticipation-visible' : 'anticipation-invisible';
-  const { state, recordTrial } = useExerciseEngine(exerciseId, CONFIG, onComplete, { initialState, onLevelUp });
-  const initialLanes = lanesForLevel(initialState?.level ?? 1);
-  const [activeLanes, setActiveLanes] = useState(initialLanes);
-  const [lane, setLane] = useState(() => Math.floor(initialLanes / 2));
-  const [targetLane, setTargetLane] = useState(0);
-  const [phase, setPhase] = useState<Phase>('approaching');
-  const [elapsedMs, setElapsedMs] = useState(0);
+  const { state, recordTrial } = useExerciseEngine(exerciseId, CONFIG, onComplete, {
+    initialState,
+    onLevelUp,
+  });
+
+  const initialLevel = initialState?.level ?? 1;
+  const [displayLevel, setDisplayLevel] = useState(initialLevel);
+  const [catX, setCatX] = useState(INITIAL_CAT_X);
+  const [trajectory, setTrajectory] = useState<DuckTrajectory>(() =>
+    pickDuckTrajectory(createTrialRng(seed, initialState?.totalTrials ?? 0), INITIAL_CAT_X),
+  );
+  const [phase, setPhase] = useState<AnticipationPhase>('approaching');
+  const [progress, setProgress] = useState(0);
   const [flash, setFlash] = useState<'success' | 'error' | null>(null);
 
-  // Quelle der Wahrheit außerhalb von State-Updatern (React StrictMode ruft
-  // Updater-Funktionen im Dev-Modus doppelt auf — Seiteneffekte wie
-  // `endTrial` dürfen deshalb nie darin stehen).
-  const laneRef = useRef(lane);
-  const targetLaneRef = useRef(targetLane);
-  const phaseRef = useRef<Phase>('approaching');
+  const catXRef = useRef(catX);
+  const trajectoryRef = useRef(trajectory);
+  const displayLevelRef = useRef(displayLevel);
+  const phaseRef = useRef<AnticipationPhase>('approaching');
   const elapsedRef = useRef(0);
   const gateRef = useRef(createTrialGate());
 
@@ -61,80 +78,70 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
     },
     [recordTrial],
   );
-  const endTrialRef = useRef(endTrial);
-  useEffect(() => {
-    endTrialRef.current = endTrial;
-  }, [endTrial]);
 
-  // Neuer Trial: Zielspur wählen, Anflug- und Auftauch-Timer starten.
-  // Während der 500ms Flash-Phase darf kein neuer Trial starten, damit Spur-Anzahl
-  // (z. B. beim Level-Up 3 -> 4 von 5 auf 7 Spuren) und getroffene Zielspur während
-  // der Erfolgsanimation stabil bleiben.
+  // Neuen Trial erst nach Ablauf des 500ms-Flashs aufsetzen, damit Level,
+  // Enten-Position und Teich-Abdeckung während der Feedback-Phase stabil bleiben.
   useEffect(() => {
     if (state.done || flash !== null) return;
 
-    // Eigene Rng-Instanz je Trial (AP3) — siehe Begründung in ChaseExercise.tsx.
     const trialRng = createTrialRng(seed, state.totalTrials);
+    const nextTrajectory = pickDuckTrajectory(trialRng, catXRef.current);
 
-    const setupTrial = () => {
-      gateRef.current.reset();
-      const currentLanes = lanesForLevel(state.level);
-      setActiveLanes(currentLanes);
-      const retainedCat = Math.min(Math.max(laneRef.current, 0), currentLanes - 1);
-      laneRef.current = retainedCat;
-      setLane(retainedCat);
-      const target = pickTargetLane(trialRng, currentLanes, retainedCat);
-      targetLaneRef.current = target;
-      setTargetLane(target);
-      phaseRef.current = 'approaching';
-      setPhase('approaching');
-      elapsedRef.current = 0;
-      setElapsedMs(0);
-    };
-    setupTrial();
+    trajectoryRef.current = nextTrajectory;
+    displayLevelRef.current = state.level;
+    phaseRef.current = 'approaching';
+    elapsedRef.current = 0;
+    gateRef.current.reset();
 
-    const travelMs = travelMsForLevel(state.level);
-    const catchWindowMs = catchWindowMsForLevel(state.level);
-
-    const tick = setInterval(() => {
-      const next = elapsedRef.current + TICK_MS;
-      elapsedRef.current = next;
-      setElapsedMs(next);
-
-      if (next >= travelMs && phaseRef.current === 'approaching') {
-        phaseRef.current = 'catchable';
-        setPhase('catchable');
-        if (laneRef.current === targetLaneRef.current) {
-          clearInterval(tick);
-          endTrialRef.current(true);
-          return;
-        }
-      }
-
-      if (next >= travelMs + catchWindowMs) {
-        clearInterval(tick);
-        if (phaseRef.current === 'catchable') endTrialRef.current(false);
-      }
-    }, TICK_MS);
-
-    return () => clearInterval(tick);
+    setTrajectory(nextTrajectory);
+    setDisplayLevel(state.level);
+    setPhase('approaching');
+    setProgress(0);
   }, [flash, state.level, state.done, state.totalTrials, seed]);
 
-  const handleMove = useCallback(
-    ({ dx }: { dx: number; dy: number }) => {
-      if (flash !== null || dx === 0) return;
-      const currentLanes = lanesForLevel(state.level);
-      const next = Math.min(Math.max(laneRef.current + dx, 0), currentLanes - 1);
-      laneRef.current = next;
-      setLane(next);
-      if (phaseRef.current === 'catchable' && next === targetLaneRef.current) {
-        endTrialRef.current(true);
-      }
-    },
-    [flash, state.level],
-  );
+  const inputEnabled = flash === null && !state.done;
+  const dirRef = useContinuousDirection({ enabled: inputEnabled });
 
-  useDirectionalInput(handleMove, { enabled: flash === null && !state.done, repeatDelayMs: 140 });
+  useAnimationLoop((dtMs) => {
+    if (flash !== null || state.done) return;
+
+    const dir = dirRef.current;
+    let nextCatX = catXRef.current;
+    if (dir.dx !== 0) {
+      nextCatX = clampPos(
+        { x: nextCatX + dir.dx * CAT_SPEED * (dtMs / 1000), y: CAT_SHORE_Y },
+        { x: CAT_MIN_X, y: CAT_SHORE_Y },
+        { x: CAT_MAX_X, y: CAT_SHORE_Y },
+      ).x;
+      catXRef.current = nextCatX;
+      setCatX(nextCatX);
+    }
+
+    const level = displayLevelRef.current;
+    const travelMs = travelMsForLevel(level);
+    const catchWindowMs = catchWindowMsForLevel(level);
+    const nextElapsed = elapsedRef.current + dtMs;
+    elapsedRef.current = nextElapsed;
+
+    const nextProgress = Math.min(1, nextElapsed / travelMs);
+    setProgress(nextProgress);
+
+    if (nextElapsed >= travelMs && phaseRef.current === 'approaching') {
+      phaseRef.current = 'catchable';
+      setPhase('catchable');
+    }
+
+    if (phaseRef.current === 'catchable') {
+      const target = trajectoryRef.current.target;
+      if (circlesOverlap({ x: nextCatX, y: CAT_SHORE_Y }, CAT_RADIUS, target, DUCK_CATCH_RADIUS)) {
+        endTrial(true);
+        return;
+      }
+      if (nextElapsed >= travelMs + catchWindowMs) {
+        endTrial(false);
+      }
+    }
+  }, inputEnabled);
 
   useEffect(() => {
     if (flash === null) return;
@@ -144,100 +151,121 @@ export default function AnticipationExercise({ seed, visible, onComplete, onCanc
     return () => clearTimeout(timeout);
   }, [flash]);
 
-  const travelMs = travelMsForLevel(state.level);
-  const progress = Math.min(1, elapsedMs / travelMs);
-  const duckTopPercent = phase === 'catchable' ? 82 : 8 + progress * 74;
-  const duckVisible = isDuckVisibleInPond(visible ? 'visible' : 'invisible', phase as AnticipationPhase, progress);
+  const duckPos = duckPositionAt(trajectory, progress);
+  const divePos = duckPositionAt(trajectory, INVISIBLE_VISIBLE_PROGRESS_LIMIT);
+  const duckVisible = isDuckVisibleInPond(visible ? 'visible' : 'invisible', phase, progress);
+  const facingRight = trajectory.target.x >= trajectory.start.x;
 
   return (
-    <GridWorld
-      cols={activeLanes}
-      rows={1}
-      tileAt={(x) => (phase === 'catchable' && x === targetLane ? 'target' : 'path')}
-      catPos={{ x: lane, y: 0 }}
+    <ArenaWorld
+      catPos={{ x: catX, y: CAT_SHORE_Y }}
+      catSize={CAT_SIZE}
       flash={flash}
       level={state.level}
       streak={{ current: state.streak, target: CONFIG.advanceStreak }}
       counter={`${state.totalTrials} / ${CONFIG.minTrials}`}
-      aboveGrid={
-        <div
-          data-testid="anticipation-lanes"
-          className="mt-16 w-[90vw] max-w-[600px] border-4 border-white rounded-2xl overflow-hidden shadow-lg grid"
-          style={{ gridTemplateColumns: `repeat(${activeLanes}, minmax(0, 1fr))` }}
-        >
-          {Array.from({ length: activeLanes }, (_, i) => {
-            const isTarget = targetLane === i;
-            const showDuckHere = isTarget && duckVisible;
-            const duckSubmergedHere = isTarget && !duckVisible && phase === 'approaching';
-            return (
-              <div
-                key={i}
-                data-testid={`anticipation-lane-${i}`}
-                className="aspect-[3/1] h-44 sm:h-52 relative min-w-0 overflow-hidden flex items-center justify-center text-2xl sm:text-3xl leading-none bg-gradient-to-b from-sky-200 via-sky-300 to-cyan-400 border border-sky-300/60 shadow-inner"
-              >
-                {/* Untere Teich-/Seerosen-Abdeckung in der Unsichtbar-Variante (ab 38% bis kurz vor dem Ufer) */}
-                {!visible && (
-                  <div
-                    data-testid={`lily-cover-${i}`}
-                    aria-hidden
-                    className="absolute inset-x-0 top-[38%] bottom-[18%] bg-emerald-600/35 backdrop-blur-[2px] border-y border-emerald-400/50 flex items-center justify-center z-10 pointer-events-none"
-                  >
-                    <span className="text-lg sm:text-xl opacity-80 select-none">🌿</span>
-                  </div>
-                )}
-
-                {/* Uferkante / Ankunftszone unten in jeder Spur */}
-                <div
-                  aria-hidden
-                  className="absolute inset-x-0 bottom-0 h-[18%] bg-amber-200/50 border-t-2 border-amber-300/80 flex items-center justify-center pointer-events-none"
-                >
-                  <span className="text-sm sm:text-base opacity-45 select-none">🌊</span>
-                </div>
-
-                {/* Dezente Bläschen an der Eintauchstelle, wenn die Ente unter Wasser schwimmt */}
-                {duckSubmergedHere && (
-                  <span
-                    data-testid="duck-submerged-cue"
-                    aria-hidden
-                    className="absolute left-1/2 -translate-x-1/2 top-[34%] text-base sm:text-lg opacity-75 animate-pulse z-20 pointer-events-none"
-                  >
-                    🫧
-                  </span>
-                )}
-
-                {/* Ente schwimmt vertikal in ihrer Zielspur von oben (8%) nach unten zum Ufer (82%) */}
-                {showDuckHere && (
-                  <span
-                    data-testid="anticipation-duck"
-                    className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 transition-all duration-100 linear leading-none ${
-                      phase === 'catchable' ? 'animate-pop' : 'animate-float-slow'
-                    }`}
-                    style={{ top: `${duckTopPercent}%` }}
-                  >
-                    🦆
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      }
+      arenaClassName="bg-amber-100/95"
       instructions={
         visible ? (
           <>
-            Beobachte die Ente (🦆) und bring die Katze rechtzeitig in ihre Spur.
+            Beobachte die Ente (🦆) und lauf rechtzeitig zum Landepunkt am Ufer.
             <br />
-            <span className="text-red-500 font-bold">Sei da, wenn sie auftaucht!</span>
+            <span className="text-red-500 font-bold">Sei da, wenn sie ankommt!</span>
           </>
         ) : (
           <>
-            Die Ente taucht unter — wo kommt sie wieder hoch?
+            Die Ente taucht unter — wohin schwimmt sie weiter?
             <br />
-            <span className="text-red-500 font-bold">Bring die Katze rechtzeitig in die richtige Spur!</span>
+            <span className="text-red-500 font-bold">Lauf rechtzeitig zum erwarteten Punkt am Ufer!</span>
           </>
         )
       }
       onExit={onCancel}
-    />
+    >
+      {/* Teichfläche (oberer Bereich 0..82%) */}
+      <div
+        data-testid="anticipation-pond"
+        className="absolute inset-x-0 top-0 bg-gradient-to-b from-sky-200 via-sky-300 to-cyan-400 pointer-events-none"
+        style={{ height: `${SHORE_TOP_Y}%` }}
+      />
+
+      {/* Uferzone (unten 82..100%) */}
+      <div
+        data-testid="anticipation-shore"
+        aria-hidden
+        className="absolute inset-x-0 bottom-0 bg-amber-100/95 border-t-4 border-amber-300/80 pointer-events-none flex items-start justify-around pt-1"
+        style={{ height: `${100 - SHORE_TOP_Y}%` }}
+      >
+        <span className="text-sm sm:text-base opacity-35 select-none">🌊</span>
+        <span className="text-sm sm:text-base opacity-35 select-none">🌊</span>
+        <span className="text-sm sm:text-base opacity-35 select-none">🌊</span>
+      </div>
+
+      {/* Teich-Abdeckung in der Unsichtbar-Variante (ab ~35% bis zum Ufer) */}
+      {!visible && (
+        <div
+          data-testid="pond-cover"
+          aria-hidden
+          className="absolute inset-x-0 bg-emerald-600/35 backdrop-blur-[2px] border-y border-emerald-400/50 flex items-center justify-around z-10 pointer-events-none"
+          style={{
+            top: `${INVISIBLE_VISIBLE_PROGRESS_LIMIT * 100}%`,
+            bottom: `${100 - SHORE_TOP_Y}%`,
+          }}
+        >
+          <span className="text-xl sm:text-2xl opacity-75 select-none">🌿</span>
+          <span className="text-xl sm:text-2xl opacity-75 select-none">🪷</span>
+          <span className="text-xl sm:text-2xl opacity-75 select-none">🌿</span>
+        </div>
+      )}
+
+      {/* Bläschen an der Eintauchstelle bei abgetauchter Ente */}
+      {!duckVisible && phase === 'approaching' && (
+        <span
+          data-testid="duck-submerged-cue"
+          aria-hidden
+          className="absolute text-base sm:text-lg opacity-80 animate-pulse z-20 pointer-events-none"
+          style={{
+            left: `${divePos.x}%`,
+            top: `${divePos.y}%`,
+            transform: 'translate(-50%, -50%)',
+          }}
+        >
+          🫧
+        </span>
+      )}
+
+      {/* Ankunftsziel-Markierung am Ufer während des Fangfensters */}
+      {phase === 'catchable' && (
+        <div
+          data-testid="duck-landing-ring"
+          aria-hidden
+          className="absolute rounded-full bg-emerald-400/35 border-2 border-emerald-500/70 animate-pulse pointer-events-none z-10"
+          style={{
+            width: `${DUCK_CATCH_RADIUS * 2}%`,
+            height: `${DUCK_CATCH_RADIUS * 2}%`,
+            left: `${trajectory.target.x}%`,
+            top: `${trajectory.target.y}%`,
+            transform: 'translate(-50%, -50%)',
+          }}
+        />
+      )}
+
+      {/* Ente auf ihrer kontinuierlichen Vektor-Bahn */}
+      {duckVisible && (
+        <span
+          data-testid="anticipation-duck"
+          className={`absolute z-20 text-2xl sm:text-4xl leading-none pointer-events-none ${
+            phase === 'catchable' ? 'animate-pop' : 'animate-float-slow'
+          }`}
+          style={{
+            left: `${duckPos.x}%`,
+            top: `${duckPos.y}%`,
+            transform: `translate(-50%, -50%) scaleX(${facingRight ? -1 : 1})`,
+          }}
+        >
+          🦆
+        </span>
+      )}
+    </ArenaWorld>
   );
 }
