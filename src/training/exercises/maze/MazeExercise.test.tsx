@@ -1,41 +1,20 @@
 // @vitest-environment jsdom
-import { act } from 'react';
-import { cleanup, render } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExerciseResult } from '../../../data/schema';
-import MazeExercise from './MazeExercise';
-import { LEVEL_MAPS, getGridSizeForLevel, getStartPosition } from './maps';
+import { soundManager } from '../../../ui';
 import { createExerciseProgress } from '../../engine';
-
-/**
- * useDirectionalInput treibt Bewegung über eine rAF-Schleife; jsdom kennt kein
- * requestAnimationFrame. Manuelle Frame-Steuerung (vgl.
- * platform/timing/timing.test.ts) statt echter Wartezeit hält den Test
- * synchron und schnell.
- */
-let rafQueue: FrameRequestCallback[] = [];
-
-function flushFrame(timeAdvanceMs = 200) {
-  vi.advanceTimersByTime(timeAdvanceMs);
-  const queue = rafQueue;
-  rafQueue = [];
-  for (const cb of queue) cb(performance.now());
-}
+import MazeExercise from './MazeExercise';
+import { LEVEL_MAPS, getMazeArenaLayout } from './maps';
 
 beforeEach(() => {
   vi.useFakeTimers();
-  rafQueue = [];
-  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-    rafQueue.push(cb);
-    return rafQueue.length;
-  });
-  vi.stubGlobal('cancelAnimationFrame', () => {});
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const KEY_FOR: Record<string, string> = {
@@ -45,20 +24,7 @@ const KEY_FOR: Record<string, string> = {
   '0,-1': 'ArrowUp',
 };
 
-function press(dx: number, dy: number) {
-  const key = KEY_FOR[`${dx},${dy}`];
-  if (!key) throw new Error(`Keine Taste für Richtung ${dx},${dy}`);
-  act(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key }));
-    flushFrame();
-  });
-  act(() => {
-    window.dispatchEvent(new KeyboardEvent('keyup', { key }));
-  });
-}
-
-/** BFS von Start (3) zu Ziel (2) über orthogonale Schritte — wie es die 4-Wege-Eingabe (AP4) verlangt. */
-function findPath(map: number[][]): { dx: number; dy: number }[] {
+function findPath(map: number[][]): { dx: number; dy: number; tx: number; ty: number }[] {
   let start: [number, number] | null = null;
   let target: [number, number] | null = null;
   for (let y = 0; y < map.length; y++) {
@@ -96,61 +62,134 @@ function findPath(map: number[][]): { dx: number; dy: number }[] {
     }
   }
 
-  const path: { dx: number; dy: number }[] = [];
+  const path: { dx: number; dy: number; tx: number; ty: number }[] = [];
   const startKey = key(start[0], start[1]);
   let cur = key(target[0], target[1]);
   while (cur !== startKey) {
     const entry = cameFrom.get(cur);
     if (!entry) throw new Error('Kein Pfad gefunden — Level nicht lösbar?');
     const [px, py, dx, dy] = entry;
-    path.push({ dx, dy });
+    const [tx, ty] = cur.split(',').map(Number) as [number, number];
+    path.push({ dx, dy, tx, ty });
     cur = key(px, py);
   }
   path.reverse();
   return path;
 }
 
-describe('MazeExercise — Wände blockieren statt bestrafen (AP4/Befund E)', () => {
-  it('Wandkontakt stoppt nur die Bewegung, ohne Trial-Ende oder Reset', () => {
+function getCatPos(container: HTMLElement): { x: number; y: number } {
+  const cat = container.querySelector<HTMLElement>('[data-testid="arena-cat"]');
+  if (!cat) throw new Error('arena-cat nicht gefunden');
+  return {
+    x: parseFloat(cat.style.left),
+    y: parseFloat(cat.style.top),
+  };
+}
+
+function solveLevel(container: HTMLElement, level: number) {
+  const map = LEVEL_MAPS[level]!;
+  const tileSize = 100 / map.length;
+  const path = findPath(map);
+
+  for (const step of path) {
+    if (container.textContent?.includes('😸')) break;
+    const key = KEY_FOR[`${step.dx},${step.dy}`]!;
+    const targetX = (step.tx + 0.5) * tileSize;
+    const targetY = (step.ty + 0.5) * tileSize;
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+    });
+
+    for (let guard = 0; guard < 120; guard++) {
+      if (container.textContent?.includes('😸')) break;
+      const pos = getCatPos(container);
+      const reachedX =
+        step.dx === 0 || (step.dx > 0 ? pos.x >= targetX : pos.x <= targetX);
+      const reachedY =
+        step.dy === 0 || (step.dy > 0 ? pos.y >= targetY : pos.y <= targetY);
+      if (reachedX && reachedY) break;
+
+      act(() => {
+        vi.advanceTimersByTime(16);
+      });
+    }
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keyup', { key }));
+    });
+  }
+}
+
+describe('MazeExercise — ArenaWorld & kontinuierliche Steuerung', () => {
+  it('Wandkontakt stoppt nur die Bewegung und loggt Bump mit ~300ms Cooldown ohne Trial-Ende', () => {
+    const playSpy = vi.spyOn(soundManager, 'play').mockImplementation(() => {});
     const { container } = render(
       <MazeExercise ageGroup={6} seed="ap4-test-seed" onComplete={() => {}} onCancel={() => {}} />,
     );
 
-    const before = container.textContent;
+    const start = getCatPos(container);
 
-    // Level 1: direkt südlich vom Start (1,1) ist eine Wand (1,2) — vgl.
-    // LEVEL_MAPS[1] in maps.ts. Der Bump darf weder die Katze bewegen noch
-    // den Trial beenden (kein Fehler-Flash, kein Reset).
-    press(0, 1);
+    // Level 1: direkt südlich vom Start (1,1) liegt eine Wand (1,2).
+    // ArrowDown gedrückt halten: nach ~160ms prallt die Katze gegen die Wand (1. Bump).
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+      vi.advanceTimersByTime(200);
+    });
 
-    expect(container.textContent).toBe(before);
+    const bumpCount1 = playSpy.mock.calls.filter(([s]) => s === 'bump').length;
+    expect(bumpCount1).toBe(1);
     expect(container.textContent).toContain('Labyrinth 0 / 6 geschafft');
+    expect(container.textContent).not.toContain('🙀');
+
+    // Katze bewegt sich etwas in Richtung Wandkante, bleibt aber im Korridor
+    const afterWall = getCatPos(container);
+    expect(afterWall.x).toBeCloseTo(start.x, 1);
+    expect(afterWall.y).toBeGreaterThan(start.y);
+    expect(afterWall.y).toBeLessThan(2 * (100 / 7));
+
+    // Weiteres Halten innerhalb von 300ms löst KEINEN weiteren Bump aus
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(playSpy.mock.calls.filter(([s]) => s === 'bump').length).toBe(1);
+
+    // Nach Ablauf des 300ms-Cooldowns löst fortgesetztes Drücken den 2. Bump aus
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    expect(playSpy.mock.calls.filter(([s]) => s === 'bump').length).toBe(2);
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown' }));
+    });
   });
 
-  it('4-way-Eingabe: Diagonalen bewegen die Katze nicht (kein Move gegen die Ecke)', () => {
+  it('Wall-Sliding: diagonales Halten entlang einer Wand gleitet flüssig in den freien Korridor', () => {
     const { container } = render(
       <MazeExercise ageGroup={6} seed="ap4-test-seed" onComplete={() => {}} onCancel={() => {}} />,
     );
-    const before = container.textContent;
+    const start = getCatPos(container);
 
-    // ArrowUp + ArrowLeft gleichzeitig halten (Diagonale) — im 4-way-Modus
-    // (Maze) darf das keinen Move auslösen (weder Bump-Sound noch Bewegung).
+    // In Level 1 ist südlich (1,2) blockiert, östlich (2,1) frei.
+    // ArrowRight + ArrowDown gleichzeitig halten → Katze gleitet nach rechts!
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp' }));
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
-      flushFrame();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+      vi.advanceTimersByTime(400);
     });
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowUp' }));
-      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowLeft' }));
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight' }));
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown' }));
     });
 
-    expect(container.textContent).toBe(before);
+    const moved = getCatPos(container);
+    expect(moved.x).toBeGreaterThan(start.x + 6);
   });
 
-  it('alle 6 Level lösen schließt die Übung ab; Wand-Bumps landen als rawEvents', () => {
+  it('alle 6 Level kontinuierlich lösen schließt die Übung ab; Wand-Bumps landen als rawEvents', () => {
     let result: ExerciseResult | undefined;
-    render(
+    const { container } = render(
       <MazeExercise
         ageGroup={6}
         seed="ap4-test-seed"
@@ -161,16 +200,17 @@ describe('MazeExercise — Wände blockieren statt bestrafen (AP4/Befund E)', ()
       />,
     );
 
-    // Ein bewusster Bump vor dem ersten Level, damit rawEvents mindestens
-    // einen wallBump enthält (Abnahme-Kriterium AP4).
-    press(0, 1);
+    // Ein bewusster Bump vor dem ersten Level, damit rawEvents mindestens einen wallBump enthält.
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+      vi.advanceTimersByTime(200);
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown' }));
+    });
 
     for (let level = 1; level <= 6; level++) {
-      const map = LEVEL_MAPS[level]!;
-      const path = findPath(map);
-      for (const step of path) press(step.dx, step.dy);
+      solveLevel(container, level);
+      expect(container.textContent).toContain('😸');
 
-      // Erfolgs-Flash (FLASH_MS) abwarten, bevor der nächste Level startet.
       act(() => {
         vi.advanceTimersByTime(600);
       });
@@ -183,7 +223,7 @@ describe('MazeExercise — Wände blockieren statt bestrafen (AP4/Befund E)', ()
     expect(result!.rawEvents?.some((e) => e.type === 'wallBump')).toBe(true);
   }, 15000);
 
-  it('wechselt das Raster beim Level-Up erst nach Ablauf des 500ms-Erfolgs-Flashs (7×7 → 9×9)', () => {
+  it('wechselt das Layout beim Level-Up erst nach Ablauf des 500ms-Erfolgs-Flashs (7×7 → 9×9)', () => {
     const initialState = { ...createExerciseProgress(6), level: 2 };
     const { container } = render(
       <MazeExercise
@@ -195,30 +235,25 @@ describe('MazeExercise — Wände blockieren statt bestrafen (AP4/Befund E)', ()
       />,
     );
 
-    const grid = container.querySelector('.grid') as HTMLElement;
-    expect(grid.children).toHaveLength(7 * 7);
+    const layoutEl = () => container.querySelector<HTMLElement>('[data-testid="maze-layout"]');
+    expect(layoutEl()?.dataset.gridSize).toBe('7');
 
-    // Level 2 bis zum Ziel durchlaufen -> löst Level-Up auf Level 3 (9×9) und Flash ('success') aus
-    for (const step of findPath(LEVEL_MAPS[2]!)) {
-      press(step.dx, step.dy);
-    }
+    solveLevel(container, 2);
 
-    // Während des 500ms-Flashs muss noch das 7×7-Raster von Level 2 sichtbar bleiben
-    expect(grid.children).toHaveLength(7 * 7);
+    // Während des 500ms-Flashs bleibt das 7×7-Layout sichtbar
+    expect(layoutEl()?.dataset.gridSize).toBe('7');
     expect(container.textContent).toContain('😸');
 
-    // Nach Ablauf von FLASH_MS wechselt das Raster auf 9×9 (Level 3)
+    // Nach Ablauf von FLASH_MS wechselt das Layout auf 9×9 (Level 3)
     act(() => {
       vi.advanceTimersByTime(600);
     });
-    expect(grid.children).toHaveLength(9 * 9);
+    expect(layoutEl()?.dataset.gridSize).toBe('9');
   });
 
-  it('Level 6 Resume: rendert 11×11-Raster und spawnt Katze auf getStartPosition(6)', () => {
-    const size = getGridSizeForLevel(6);
-    expect(size).toBe(11);
-    const start = getStartPosition(6);
-    expect(start).toEqual({ x: 1, y: 1 });
+  it('Level 6 Resume: rendert 11×11-Layout und spawnt Katze auf getMazeArenaLayout(6).startPos', () => {
+    const layout6 = getMazeArenaLayout(6);
+    expect(layout6.gridSize).toBe(11);
 
     const initialState = { ...createExerciseProgress(6), level: 6 };
     const { container } = render(
@@ -231,16 +266,12 @@ describe('MazeExercise — Wände blockieren statt bestrafen (AP4/Befund E)', ()
       />,
     );
 
-    const grid = container.querySelector('.grid') as HTMLElement;
-    expect(grid.children).toHaveLength(11 * 11);
+    const layoutEl = container.querySelector<HTMLElement>('[data-testid="maze-layout"]');
+    expect(layoutEl?.dataset.gridSize).toBe('11');
 
-    const tileW = 100 / size;
-    const startLeft = `${start.x * tileW}%`;
-    const startTop = `${start.y * tileW}%`;
-
-    const startCat = container.querySelector(`[style*="left: ${startLeft}"][style*="top: ${startTop}"]`);
-    expect(startCat).not.toBeNull();
-    expect(startCat?.textContent).toContain('🐱');
+    const pos = getCatPos(container);
+    expect(pos.x).toBeCloseTo(layout6.startPos.x, 3);
+    expect(pos.y).toBeCloseTo(layout6.startPos.y, 3);
     expect(container.textContent).toContain('Level 6');
   });
 });
