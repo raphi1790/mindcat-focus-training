@@ -1,77 +1,51 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { StrictMode, act } from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import SideExercise from './SideExercise';
 import { createExerciseProgress } from '../../engine';
-import { LEVEL_MAPS, getStartPosition } from './maps';
-
-let rafQueue: FrameRequestCallback[] = [];
-
-function flushFrame(timeAdvanceMs = 300) {
-  vi.advanceTimersByTime(timeAdvanceMs);
-  const queue = rafQueue;
-  rafQueue = [];
-  for (const cb of queue) cb(performance.now());
-}
+import SideExercise from './SideExercise';
+import { getStartPosition } from './maps';
 
 beforeEach(() => {
   vi.useFakeTimers();
-  rafQueue = [];
-  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-    rafQueue.push(cb);
-    return rafQueue.length;
-  });
-  vi.stubGlobal('cancelAnimationFrame', () => {});
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  vi.unstubAllGlobals();
 });
 
-const KEY_FOR: Record<string, string> = {
-  '1,0': 'ArrowRight',
-  '-1,0': 'ArrowLeft',
-  '0,1': 'ArrowDown',
-  '0,-1': 'ArrowUp',
-};
+function streakLabel(container: HTMLElement): string | null {
+  return container.querySelector('[aria-label*="Sternen"]')?.getAttribute('aria-label') ?? null;
+}
 
-function press(dx: number, dy: number) {
-  const key = KEY_FOR[`${dx},${dy}`];
-  if (!key) throw new Error(`Keine Taste für Richtung ${dx},${dy}`);
+function holdKeys(keys: string[], durationMs: number) {
   act(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key }));
-    flushFrame();
-  });
-  act(() => {
-    window.dispatchEvent(new KeyboardEvent('keyup', { key }));
+    for (const key of keys) window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+    vi.advanceTimersByTime(durationMs);
+    for (const key of keys) window.dispatchEvent(new KeyboardEvent('keyup', { key }));
   });
 }
 
-describe('SideExercise — Avatar-Spawn & Level-Resume (Issue #25)', () => {
-  it('Level 1 Standard-Start: Katze spawnt auf getStartPosition(1) = (4, 4)', () => {
-    expect(getStartPosition(1)).toEqual({ x: 4, y: 4 });
-    const { container } = render(
+describe('SideExercise — Kontinuierliche Arena (Issue #52)', () => {
+  it('Level 1 Standard-Start: Katze spawnt mittig bei (50%, 50%) mit 4 Grasstreifen und 0 Schlamm', () => {
+    expect(getStartPosition(1)).toEqual({ x: 50, y: 50 });
+    const { container, getByTestId, queryAllByTestId } = render(
       <SideExercise ageGroup={6} seed="test-seed" onComplete={() => {}} onCancel={() => {}} />,
     );
 
-    // GridWorld platziert die Katze mit inline styles: left: 40%, top: 40% (4 * 10%)
-    const catContainer = container.querySelector('[style*="left: 40%"][style*="top: 40%"]');
-    expect(catContainer).not.toBeNull();
-    expect(catContainer?.textContent).toContain('🐱');
+    const cat = getByTestId('arena-cat');
+    expect(cat.style.left).toBe('50%');
+    expect(cat.style.top).toBe('50%');
+    expect(cat.textContent).toContain('🐱');
+    expect(queryAllByTestId('side-grass')).toHaveLength(4);
+    expect(queryAllByTestId('side-mud')).toHaveLength(0);
+    expect(container.textContent).toContain('Level 1');
   });
 
-  it('Level 5 Resume: Katze spawnt auf getStartPosition(5) = (8, 8) und NICHT im Schlamm (4, 4)', () => {
-    // In LEVEL_MAPS[5] ist (4, 4) ein Schlammfeld (Wert 1)!
-    // Die korrekte Startposition ist (8, 8) (Wert 3).
-    expect(getStartPosition(5)).toEqual({ x: 8, y: 8 });
-    expect(LEVEL_MAPS[5]![4]![4]).toBe(1); // Schlamm!
-    expect(LEVEL_MAPS[5]![8]![8]).toBe(3); // Start!
-
+  it('Level 5 Resume: Katze spawnt sicher bei (50%, 50%) und erreicht links Gras ohne Fehlermeldung', () => {
     const initialState = { ...createExerciseProgress(5), level: 5 };
-    const { container } = render(
+    const { container, getByTestId } = render(
       <SideExercise
         ageGroup={6}
         seed="test-seed"
@@ -81,22 +55,25 @@ describe('SideExercise — Avatar-Spawn & Level-Resume (Issue #25)', () => {
       />,
     );
 
-    // Die Katze darf keinesfalls bei 40%, 40% (Schlamm) spawnen
-    const mudContainer = container.querySelector('[style*="left: 40%"][style*="top: 40%"]');
-    expect(mudContainer).toBeNull();
-
-    // Die Katze MUSS bei 80%, 80% (getStartPosition(5)) spawnen
-    const startContainer = container.querySelector('[style*="left: 80%"][style*="top: 80%"]');
-    expect(startContainer).not.toBeNull();
-    expect(startContainer?.textContent).toContain('🐱');
-
-    // HUD muss Level 5 anzeigen
+    const cat = getByTestId('arena-cat');
+    expect(cat.style.left).toBe('50%');
+    expect(cat.style.top).toBe('50%');
     expect(container.textContent).toContain('Level 5');
+
+    // Kurze Bewegung nach links bleibt im sicheren Bereich
+    holdKeys(['ArrowLeft'], 160);
+    expect(parseFloat(cat.style.left)).toBeLessThan(50);
+    expect(cat.textContent).not.toContain('🙀');
+
+    // Weiter nach links in das linke Grasfeld (x <= 14)
+    holdKeys(['ArrowLeft'], 800);
+    expect(cat.textContent).toContain('😸');
+    expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
   });
 
-  it('Schritt von Startposition in Level 5 löst keinen Schlammfehler aus', () => {
-    const initialState = { ...createExerciseProgress(5), level: 5 };
-    const { container } = render(
+  it('Schlamm-Kontakt in Level 2 löst Fehler-Feedback aus und setzt Katze nach 500ms zurück', () => {
+    const initialState = { ...createExerciseProgress(2), level: 2 };
+    const { container, getByTestId } = render(
       <SideExercise
         ageGroup={6}
         seed="test-seed"
@@ -106,17 +83,41 @@ describe('SideExercise — Avatar-Spawn & Level-Resume (Issue #25)', () => {
       />,
     );
 
-    // In Level 5 ist (8, 7) ein sicherer Pfad (0), siehe LEVEL_MAPS[5]
-    expect(LEVEL_MAPS[5]![7]![8]).toBe(0);
+    // Level 2: unten (y >= 90) ist Schlamm
+    holdKeys(['ArrowDown'], 950);
+    expect(getByTestId('arena-cat').textContent).toContain('🙀');
+    expect(streakLabel(container)).toBe('0 von 3 Sternen bis zum nächsten Level');
 
-    // Bewege nach oben (dy: -1)
-    press(0, -1);
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(getByTestId('arena-cat').textContent).toContain('🐱');
+    expect(getByTestId('arena-cat').style.left).toBe('50%');
+    expect(getByTestId('arena-cat').style.top).toBe('50%');
+  });
 
-    // Katze sollte auf (8, 7) stehen -> top: 70%, left: 80%
-    const newPos = container.querySelector('[style*="left: 80%"][style*="top: 70%"]');
-    expect(newPos).not.toBeNull();
+  it('unterstützt 8-Wege-Diagonalbewegung mit normierter Geschwindigkeit und StrictMode ohne Doppelzählung', () => {
+    const { container, getByTestId } = render(
+      <StrictMode>
+        <SideExercise ageGroup={4} seed="test-seed" onComplete={() => {}} onCancel={() => {}} />
+      </StrictMode>,
+    );
 
-    // Kein Fehler-Emoji (🙀)
-    expect(container.textContent).not.toContain('🙀');
+    // Kurzer diagonaler Schritt nach oben-rechts: beide Achsen ändern sich gleich stark (~0.707 * v * t)
+    holdKeys(['ArrowUp', 'ArrowRight'], 200);
+    const cat = getByTestId('arena-cat');
+    const x = parseFloat(cat.style.left);
+    const y = parseFloat(cat.style.top);
+    expect(x).toBeGreaterThan(50);
+    expect(y).toBeLessThan(50);
+    // Distanz nach 200ms bei 45%/s ≈ 9% (nicht ~12.7% wie unnormiert)
+    const dist = Math.hypot(x - 50, y - 50);
+    expect(dist).toBeGreaterThan(6);
+    expect(dist).toBeLessThan(10.5);
+
+    // Weiter nach oben ins obere Grasfeld → genau 1 Stern unter StrictMode
+    holdKeys(['ArrowUp'], 900);
+    expect(cat.textContent).toContain('😸');
+    expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
   });
 });

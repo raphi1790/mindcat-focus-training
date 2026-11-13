@@ -1,19 +1,19 @@
 import type { Rng } from '../../../platform/rng';
+import { circlesOverlap, type Bounds, type Vec2 } from '../../shared/arenaMath';
 
-export type Pos = { x: number; y: number };
+export const CAT_SIZE = 10;
+export const UMBRELLA_SIZE = 10;
+export const CAT_RADIUS = 4.5;
+export const UMBRELLA_RADIUS = 4.5;
+export const CAT_SPEED = 50; // % der Arena pro Sekunde
+export const CHASE_CENTER: Vec2 = { x: 50, y: 50 };
 
-const MOVE_DIRECTIONS: readonly Pos[] = [
-  { x: 0, y: -1 },
-  { x: 0, y: 1 },
-  { x: -1, y: 0 },
-  { x: 1, y: 0 },
-  { x: -1, y: -1 },
-  { x: 1, y: -1 },
-  { x: -1, y: 1 },
-  { x: 1, y: 1 },
-];
-
-const LEVEL_1_STEP_OPTIONS: readonly Pos[] = [...MOVE_DIRECTIONS, { x: 0, y: 0 }];
+export const UMBRELLA_BOUNDS: Bounds = {
+  minX: UMBRELLA_RADIUS,
+  maxX: 100 - UMBRELLA_RADIUS,
+  minY: UMBRELLA_RADIUS,
+  maxY: 100 - UMBRELLA_RADIUS,
+};
 
 export const FLEE_PROBABILITY_BY_LEVEL: Record<number, number> = {
   1: 0,
@@ -30,126 +30,148 @@ export function fleeProbabilityForLevel(level: number): number {
   return FLEE_PROBABILITY_BY_LEVEL[clamped] ?? 0;
 }
 
+/** Intervall (ms) zwischen periodischen Vektor-Anpassungen des Regenschirms. */
 export function stepIntervalForLevel(level: number): number {
-  return Math.max(220, 700 - (level - 1) * 75);
+  const clamped = Math.min(Math.max(Math.floor(level), 1), 7);
+  return Math.max(220, 700 - (clamped - 1) * 75);
 }
 
-function distSq(a: Pos, b: Pos): number {
+/** Kontinuierliche Laufgeschwindigkeit des Regenschirms (% der Arena pro Sekunde). */
+export function umbrellaSpeedForLevel(level: number): number {
+  const clamped = Math.min(Math.max(Math.floor(level), 1), 7);
+  return 16 + (clamped - 1) * 3.5;
+}
+
+/** Zeitlimit (ms) pro Trial. */
+export function timeLimitForLevel(level: number): number {
+  const clamped = Math.min(Math.max(Math.floor(level), 1), 7);
+  return Math.max(4200, 9000 - (clamped - 1) * 800);
+}
+
+function distSq(a: Vec2, b: Vec2): number {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
   return dx * dx + dy * dy;
 }
 
-/**
- * Berechnet den nächsten Schritt des Regenschirms (Issue #44).
- * - Level 1: 0 % Flucht-Bias, zufällige Wahl inkl. Stillstand {0, 0}.
- * - Ab Level 2: Kein Stillstand mehr (nur echte Schritte innerhalb des Gitters)
- *   und steigende Flucht-Wahrscheinlichkeit (Flee-Bias), bei der Felder gewählt
- *   werden, die die Distanz zur Katze vergrößern bzw. maximal halten.
- */
-export function stepUmbrella(
-  pos: Pos,
-  catPos: Pos,
-  level: number,
-  rng: Rng,
-  gridSize = 8,
-): Pos {
-  if (level <= 1) {
-    const choice = rng.pick(LEVEL_1_STEP_OPTIONS);
-    return {
-      x: Math.min(Math.max(pos.x + choice.x, 0), gridSize - 1),
-      y: Math.min(Math.max(pos.y + choice.y, 0), gridSize - 1),
-    };
-  }
+function bounceAxis(coord: number, vel: number, min: number, max: number): [number, number] {
+  if (coord < min) return [Math.min(max, min + (min - coord)), Math.abs(vel)];
+  if (coord > max) return [Math.max(min, max - (coord - max)), -Math.abs(vel)];
+  return [coord, vel];
+}
 
-  const validNeighbors: Pos[] = [];
-  for (const d of MOVE_DIRECTIONS) {
-    const nx = pos.x + d.x;
-    const ny = pos.y + d.y;
-    if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
-      validNeighbors.push({ x: nx, y: ny });
-    }
-  }
-
-  if (validNeighbors.length === 0) return pos;
-
-  const fleeProb = fleeProbabilityForLevel(level);
-  if (rng.next() < fleeProb) {
-    const currentDist = distSq(pos, catPos);
-    const increasing = validNeighbors.filter((n) => distSq(n, catPos) > currentDist);
-    if (increasing.length > 0) {
-      return rng.pick(increasing);
-    }
-    const maxDist = Math.max(...validNeighbors.map((n) => distSq(n, catPos)));
-    const best = validNeighbors.filter((n) => distSq(n, catPos) === maxDist);
-    return rng.pick(best);
-  }
-
-  return rng.pick(validNeighbors);
+function advanceAndBounce(
+  pos: Vec2,
+  vel: Vec2,
+  dist: number,
+  bounds: Bounds,
+): { pos: Vec2; vel: Vec2 } {
+  const [x, vx] = bounceAxis(pos.x + vel.x * dist, vel.x, bounds.minX, bounds.maxX);
+  const [y, vy] = bounceAxis(pos.y + vel.y * dist, vel.y, bounds.minY, bounds.maxY);
+  return { pos: { x, y }, vel: { x: vx, y: vy } };
 }
 
 /**
- * Kontinuierliche Kollisionserkennung zwischen Katze und Schirm (Issue #12).
- * Erkennt:
- * 1. Direkte Treffer: Katze landet auf Schirm oder Schirm zieht auf Katze
- * 2. Counter-Step / Swap: Katze und Schirm kreuzen denselben Pfad (Gegenbewegung auf gleicher Kante)
- * 3. Diagonale Swept Volume: Katze oder Schirm streifen das jeweils andere Objekt
- *    über die überstrichenen orthogonalen Zwischenfelder bei Diagonalschritten.
+ * Erzeugt eine deterministische Startposition des Regenschirms mit Mindestabstand
+ * zur Katze im Bereich `[margin, 100 - margin]`.
  */
-export function checkChaseCollision(
-  catPrev: Pos,
-  catNext: Pos,
-  targetPrev: Pos,
-  targetNext: Pos,
+export function spawnUmbrellaPos(
+  catPos: Vec2,
+  rng: Rng,
+  minDistance = 20,
+  margin = 10,
+): Vec2 {
+  const span = 100 - 2 * margin;
+  for (let i = 0; i < 20; i++) {
+    const pos = {
+      x: margin + rng.next() * span,
+      y: margin + rng.next() * span,
+    };
+    if (Math.hypot(pos.x - catPos.x, pos.y - catPos.y) >= minDistance) {
+      return pos;
+    }
+  }
+  return {
+    x: catPos.x < 50 ? 100 - margin * 2 : margin * 2,
+    y: catPos.y < 50 ? 100 - margin * 2 : margin * 2,
+  };
+}
+
+/**
+ * Wählt einen normierten 2D-Richtungsvektor für den Regenschirm.
+ * Höhere Level wählen mit `fleeProbabilityForLevel(level)` eine Richtung,
+ * die nach kurzer Vorausschau (inkl. Wand-Abprall) die Distanz zur Katze maximiert.
+ */
+export function chooseUmbrellaDirection(
+  pos: Vec2,
+  catPos: Vec2,
+  level: number,
+  rng: Rng,
+  bounds: Bounds = UMBRELLA_BOUNDS,
+): Vec2 {
+  const baseAngle = rng.next() * Math.PI * 2;
+  if (rng.next() >= fleeProbabilityForLevel(level)) {
+    return { x: Math.cos(baseAngle), y: Math.sin(baseAngle) };
+  }
+
+  let bestDir: Vec2 = { x: Math.cos(baseAngle), y: Math.sin(baseAngle) };
+  let bestDist = -1;
+  const lookahead = 12;
+
+  for (let i = 0; i < 8; i++) {
+    const angle = baseAngle + (i * Math.PI) / 4;
+    const dir = { x: Math.cos(angle), y: Math.sin(angle) };
+    const predicted = advanceAndBounce(pos, dir, lookahead, bounds).pos;
+    const d = distSq(predicted, catPos);
+    if (d > bestDist) {
+      bestDist = d;
+      bestDir = dir;
+    }
+  }
+
+  return bestDir;
+}
+
+export interface UmbrellaStepState {
+  pos: Vec2;
+  vel: Vec2;
+  turnTimerMs: number;
+}
+
+/**
+ * Bewegt den Regenschirm kontinuierlich über `dtMs`, lässt ihn an den Arena-Rändern
+ * abprallen und passt seinen Richtungsvektor periodisch alle `stepIntervalForLevel(level)` ms an.
+ */
+export function stepUmbrellaContinuous(
+  pos: Vec2,
+  vel: Vec2,
+  catPos: Vec2,
+  level: number,
+  dtMs: number,
+  turnTimerMs: number,
+  rng: Rng,
+  bounds: Bounds = UMBRELLA_BOUNDS,
+): UmbrellaStepState {
+  const dist = (umbrellaSpeedForLevel(level) * dtMs) / 1000;
+  const moved = advanceAndBounce(pos, vel, dist, bounds);
+  let nextVel = moved.vel;
+  let nextTimer = turnTimerMs + dtMs;
+  const turnInterval = stepIntervalForLevel(level);
+
+  while (nextTimer >= turnInterval) {
+    nextTimer -= turnInterval;
+    nextVel = chooseUmbrellaDirection(moved.pos, catPos, level, rng, bounds);
+  }
+
+  return { pos: moved.pos, vel: nextVel, turnTimerMs: nextTimer };
+}
+
+/** Prüft Fang per Hitbox-Kreisüberlappung zwischen Katze und Regenschirm. */
+export function checkChaseOverlap(
+  catPos: Vec2,
+  targetPos: Vec2,
+  catRadius = CAT_RADIUS,
+  targetRadius = UMBRELLA_RADIUS,
 ): boolean {
-  // 1. Direkter Treffer am Zielpunkt (oder Schirm zieht auf Katze)
-  if (catNext.x === targetNext.x && catNext.y === targetNext.y) {
-    return true;
-  }
-
-  // 2. Positionstausch / Gegenbewegung (Head-on Counter-Step auf gleicher Kante)
-  if (
-    catNext.x === targetPrev.x &&
-    catNext.y === targetPrev.y &&
-    targetNext.x === catPrev.x &&
-    targetNext.y === catPrev.y
-  ) {
-    return true;
-  }
-
-  // 3. Diagonaler Swept-Volume-Check der Katze über orthogonale Zwischenfelder
-  const catDx = catNext.x - catPrev.x;
-  const catDy = catNext.y - catPrev.y;
-  if (catDx !== 0 && catDy !== 0) {
-    const inter1 = { x: catPrev.x + catDx, y: catPrev.y };
-    const inter2 = { x: catPrev.x, y: catPrev.y + catDy };
-
-    if (
-      (inter1.x === targetNext.x && inter1.y === targetNext.y) ||
-      (inter2.x === targetNext.x && inter2.y === targetNext.y) ||
-      (inter1.x === targetPrev.x && inter1.y === targetPrev.y) ||
-      (inter2.x === targetPrev.x && inter2.y === targetPrev.y)
-    ) {
-      return true;
-    }
-  }
-
-  // 4. Diagonaler Swept-Volume-Check des Schirms über orthogonale Zwischenfelder
-  const targetDx = targetNext.x - targetPrev.x;
-  const targetDy = targetNext.y - targetPrev.y;
-  if (targetDx !== 0 && targetDy !== 0) {
-    const tInter1 = { x: targetPrev.x + targetDx, y: targetPrev.y };
-    const tInter2 = { x: targetPrev.x, y: targetPrev.y + targetDy };
-
-    if (
-      (tInter1.x === catNext.x && tInter1.y === catNext.y) ||
-      (tInter2.x === catNext.x && tInter2.y === catNext.y) ||
-      (tInter1.x === catPrev.x && tInter1.y === catPrev.y) ||
-      (tInter2.x === catPrev.x && tInter2.y === catPrev.y)
-    ) {
-      return true;
-    }
-  }
-
-  return false;
+  return circlesOverlap(catPos, catRadius, targetPos, targetRadius);
 }
