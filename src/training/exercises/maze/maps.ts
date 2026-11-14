@@ -87,6 +87,19 @@ export const LEVEL_MAPS: Record<number, number[][]> = {
   ],
 };
 
+import type { Rect, Vec2 } from '../../shared/arenaMath';
+
+export interface MazeArenaLayout {
+  gridSize: number;
+  tileSize: number;
+  walls: Rect[];
+  startPos: Vec2;
+  goalPos: Vec2;
+  catSize: number;
+  catRadius: number;
+  goalRadius: number;
+}
+
 export function getGridSizeForLevel(level: number): number {
   return LEVEL_MAPS[level]?.length ?? LEVEL_MAPS[1]!.length;
 }
@@ -101,4 +114,50 @@ export function getStartPosition(level: number): { x: number; y: number } {
     }
   }
   return { ...START_POS };
+}
+
+/**
+ * Konvertiert die Raster-Karte eines Levels in Prozent-Koordinaten (`0..100`)
+ * für `ArenaWorld` + `slideMoveWithObstacles`. Zusammenhängende horizontale
+ * Wand-Kacheln werden je Zeile zu einem Rechteck zusammengefasst.
+ */
+export function getMazeArenaLayout(level: number): MazeArenaLayout {
+  const map = LEVEL_MAPS[level] ?? LEVEL_MAPS[1]!;
+  const gridSize = map.length;
+  const tileSize = 100 / gridSize;
+  const walls: Rect[] = [];
+
+  for (let y = 0; y < gridSize; y++) {
+    const row = map[y] ?? [];
+    let runStart = -1;
+    for (let x = 0; x <= gridSize; x++) {
+      const isWall = x < gridSize && row[x] === 1;
+      if (isWall && runStart === -1) {
+        runStart = x;
+      } else if (!isWall && runStart !== -1) {
+        walls.push({
+          x: runStart * tileSize,
+          y: y * tileSize,
+          width: (x - runStart) * tileSize,
+          height: tileSize,
+        });
+        runStart = -1;
+      }
+    }
+  }
+
+  const start = getStartPosition(level);
+  const goal = GOAL_POS[level] ?? GOAL_POS[1]!;
+  const catSize = tileSize * 0.72;
+
+  return {
+    gridSize,
+    tileSize,
+    walls,
+    startPos: { x: (start.x + 0.5) * tileSize, y: (start.y + 0.5) * tileSize },
+    goalPos: { x: (goal.x + 0.5) * tileSize, y: (goal.y + 0.5) * tileSize },
+    catSize,
+    catRadius: catSize / 2,
+    goalRadius: tileSize * 0.34,
+  };
 }

@@ -1,101 +1,112 @@
 // @vitest-environment jsdom
-import { StrictMode, act } from 'react';
-import { cleanup, render } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRng, createTrialRng } from '../../../platform/rng';
 import { createExerciseProgress } from '../../engine';
 import {
-  catchWindowMsForLevel,
+  CAT_MAX_X,
+  CAT_MIN_X,
+  CAT_SPEED,
+  DUCK_TARGET_Y,
   INVISIBLE_VISIBLE_PROGRESS_LIMIT,
+  POND_START_Y,
+  catchWindowMsForLevel,
+  duckPositionAt,
   isDuckVisibleInPond,
-  lanesForLevel,
-  pickTargetLane,
+  pickDuckTrajectory,
   travelMsForLevel,
 } from './anticipationEngine';
 import AnticipationInvisible from './AnticipationInvisible';
 import AnticipationVisible from './AnticipationVisible';
 
-/**
- * AP1/Befund A (Fix-Plan Testrunde 1): `endTrial` lag in den Updatern von
- * `setLane` und `setElapsedMs`, die React unter StrictMode doppelt aufruft →
- * ein Trial zählte doppelt. Beide Pfade werden hier **in StrictMode** geprüft:
- * der Timer-Pfad (verpasster Trial) und der Bewegungs-Pfad (richtiger Trial).
- */
-
-let rafQueue: FrameRequestCallback[] = [];
-
-function flushFrame(timeAdvanceMs = 200) {
-  vi.advanceTimersByTime(timeAdvanceMs);
-  const queue = rafQueue;
-  rafQueue = [];
-  for (const cb of queue) cb(performance.now());
-}
-
 beforeEach(() => {
   vi.useFakeTimers();
-  rafQueue = [];
-  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-    rafQueue.push(cb);
-    return rafQueue.length;
-  });
-  vi.stubGlobal('cancelAnimationFrame', () => {});
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
-// Spiegelt LANES/HOME_LANE und travelMsForLevel/catchWindowMsForLevel (Level 1).
-const LANES = 5;
-const HOME_LANE = 2;
-const TRAVEL_MS_L1 = 3600;
-const CATCH_WINDOW_MS_L1 = 1600;
+const TRAVEL_MS_L1 = travelMsForLevel(1);
+const CATCH_WINDOW_MS_L1 = catchWindowMsForLevel(1);
 const SEED = 'ap1-test-seed';
 
-/** Spiegelt pickTargetLane() aus AnticipationExercise.tsx für Trial 0. */
-function targetLaneForTrial0(seed: string): number {
-  const rng = createTrialRng(seed, 0);
-  let lane: number;
-  let guard = 0;
-  do {
-    lane = rng.int(0, LANES);
-    guard += 1;
-  } while (lane === HOME_LANE && guard < 20);
-  return lane;
+function trajectoryForTrial(seed: string, trialIndex: number, catX = 50) {
+  return pickDuckTrajectory(createTrialRng(seed, trialIndex), catX);
 }
 
-function press(key: string) {
+function getCatX(container: HTMLElement): number {
+  const cat = container.querySelector<HTMLElement>('[data-testid="arena-cat"]');
+  if (!cat) throw new Error('arena-cat nicht gefunden');
+  return parseFloat(cat.style.left);
+}
+
+function getDuckPos(container: HTMLElement): { x: number; y: number } {
+  const duck = container.querySelector<HTMLElement>('[data-testid="anticipation-duck"]');
+  if (!duck) throw new Error('anticipation-duck nicht gefunden');
+  return {
+    x: parseFloat(duck.style.left),
+    y: parseFloat(duck.style.top),
+  };
+}
+
+function moveCatToX(container: HTMLElement, targetX: number): number {
+  const curX = getCatX(container);
+  if (Math.abs(targetX - curX) <= 1) return 0;
+  const key = targetX > curX ? 'ArrowRight' : 'ArrowLeft';
+  let elapsed = 0;
+
   act(() => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key }));
-    flushFrame();
   });
+
+  for (let i = 0; i < 150; i++) {
+    const x = getCatX(container);
+    if ((targetX > curX && x >= targetX - 1) || (targetX < curX && x <= targetX + 1)) {
+      break;
+    }
+    act(() => {
+      vi.advanceTimersByTime(16);
+    });
+    elapsed += 16;
+  }
+
   act(() => {
     window.dispatchEvent(new KeyboardEvent('keyup', { key }));
   });
+  return elapsed;
 }
 
 function streakLabel(container: HTMLElement): string | null {
   return container.querySelector('[aria-label*="Sternen"]')?.getAttribute('aria-label') ?? null;
 }
 
-function renderExercise(initialLevel = 1) {
-  const initialState = initialLevel > 1 ? { ...createExerciseProgress(), level: initialLevel } : undefined;
+function renderVisible(initialLevel = 1, streak = 0) {
+  const initialState =
+    initialLevel > 1 || streak > 0
+      ? { ...createExerciseProgress(), level: initialLevel, streak }
+      : undefined;
   return render(
     <StrictMode>
-      <AnticipationVisible ageGroup={4} seed={SEED} initialState={initialState} onComplete={() => {}} onCancel={() => {}} />
+      <AnticipationVisible
+        ageGroup={4}
+        seed={SEED}
+        initialState={initialState}
+        onComplete={() => {}}
+        onCancel={() => {}}
+      />
     </StrictMode>,
   );
 }
 
 describe('AnticipationExercise — kein Doppelzählen unter StrictMode (AP1/Befund A)', () => {
   it('verpasster Trial zählt genau einmal (Timer-Pfad)', () => {
-    const { container } = renderExercise();
+    const { container } = renderVisible();
     expect(container.textContent).toContain('0 / 21');
 
-    // Ente taucht auf und das Fangfenster verstreicht, ohne dass die Katze
-    // die Spur wechselt → genau ein verpasster Trial.
     act(() => {
       vi.advanceTimersByTime(TRAVEL_MS_L1 + CATCH_WINDOW_MS_L1 + 100);
     });
@@ -104,21 +115,17 @@ describe('AnticipationExercise — kein Doppelzählen unter StrictMode (AP1/Befu
     expect(container.textContent).not.toContain('2 / 21');
   });
 
-  it('erster richtiger Trial füllt genau 1 Stern (nicht 2) — Bewegungs-Pfad', () => {
-    const target = targetLaneForTrial0(SEED);
-    expect(target).not.toBe(HOME_LANE);
-
-    const { container } = renderExercise();
+  it('erster richtiger Trial füllt genau 1 Stern (nicht 2) — kontinuierlicher Bewegungs-Pfad', () => {
+    const traj = trajectoryForTrial(SEED, 0, 50);
+    const { container } = renderVisible();
     expect(streakLabel(container)).toBe('0 von 3 Sternen bis zum nächsten Level');
 
-    // Katze rechtzeitig in die Zielspur bringen (je Zug 200 ms — weit vor dem
-    // Auftauchen der Ente nach 3600 ms).
-    const key = target > HOME_LANE ? 'ArrowRight' : 'ArrowLeft';
-    for (let i = 0; i < Math.abs(target - HOME_LANE); i++) press(key);
+    const spentMs = moveCatToX(container, traj.target.x);
+    expect(spentMs).toBeLessThan(TRAVEL_MS_L1);
 
-    // Bis zum Auftauchen vorspulen: Katze steht richtig → korrekter Trial.
+    // Bis zum Auftauchen vorspulen: Katze steht am Landepunkt → korrekter Trial.
     act(() => {
-      vi.advanceTimersByTime(TRAVEL_MS_L1);
+      vi.advanceTimersByTime(TRAVEL_MS_L1 - spentMs + 32);
     });
 
     expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
@@ -126,265 +133,168 @@ describe('AnticipationExercise — kein Doppelzählen unter StrictMode (AP1/Befu
   });
 });
 
-describe('Anticipation — Vertikale Schwimmspuren & Sichtbarkeit (Issue #45, Rueda 2005)', () => {
-  it('Ente schwimmt in Visible durchgehend vertikal in ihrer Zielspur von oben nach unten zum Ufer', () => {
-    const target = targetLaneForTrial0(SEED);
-    const { container } = renderExercise(1);
+describe('Anticipation — Vektor-Trajektorie & Sichtbarkeit (Issue #53 & #45, Rueda 2005)', () => {
+  it('Ente schwimmt in Visible durchgehend geradlinig mit Winkel über den Teich zum Ufer', () => {
+    const traj = trajectoryForTrial(SEED, 0, 50);
+    const { container } = renderVisible(1);
 
-    // Zu Beginn (t = 0 ms): Ente ist genau in targetLane oben (top: 8%) sichtbar
-    const duckStart = container.querySelector<HTMLElement>('[data-testid="anticipation-duck"]');
-    expect(duckStart).not.toBeNull();
-    expect(duckStart?.style.top).toBe('8%');
-    expect(container.querySelector(`[data-testid="anticipation-lane-${target}"]`)?.textContent).toContain('🦆');
+    // Zu Beginn (t = 0): Ente oben am Startpunkt (y = 8%)
+    const duckStart = getDuckPos(container);
+    expect(duckStart.x).toBeCloseTo(traj.start.x, 1);
+    expect(duckStart.y).toBeCloseTo(POND_START_Y, 1);
 
-    // Nach halber Schwimmzeit (t = 1800 ms, progress = 0.5): Ente ist bei top = 45% weiterhin in derselben Zielspur sichtbar
+    // Nach halber Schwimmzeit (progress ≈ 0.5): Ente auf halber Geraden
     act(() => {
       vi.advanceTimersByTime(TRAVEL_MS_L1 / 2);
     });
-    const duckMid = container.querySelector<HTMLElement>('[data-testid="anticipation-duck"]');
-    expect(duckMid).not.toBeNull();
-    expect(duckMid?.style.top).toBe('45%');
-    expect(container.querySelector(`[data-testid="anticipation-lane-${target}"]`)?.textContent).toContain('🦆');
+    const expectedMid = duckPositionAt(traj, 0.5);
+    const duckMid = getDuckPos(container);
+    expect(duckMid.x).toBeCloseTo(expectedMid.x, 0);
+    expect(duckMid.y).toBeCloseTo(expectedMid.y, 0);
 
-    // Am Ufer angekommen (t = 3600 ms, progress = 1.0): Ente ist unten am Ufer (top: 82%)
+    // Bei Ankunft am Ufer: Ente am Ufer-Zielpunkt
     act(() => {
-      vi.advanceTimersByTime(TRAVEL_MS_L1 / 2);
+      vi.advanceTimersByTime(TRAVEL_MS_L1 / 2 + 32);
     });
-    const duckArrived = container.querySelector<HTMLElement>('[data-testid="anticipation-duck"]');
-    expect(duckArrived?.style.top).toBe('82%');
+    const duckEnd = getDuckPos(container);
+    expect(duckEnd.x).toBeCloseTo(traj.target.x, 1);
+    expect(duckEnd.y).toBeCloseTo(DUCK_TARGET_Y, 1);
+    expect(container.querySelector('[data-testid="duck-landing-ring"]')).not.toBeNull();
   });
 
-  it('Ente ist in Invisible im oberen Bereich (progress < 0.38) sichtbar, taucht unter die Seerosen-Abdeckung ab und taucht am Ufer wieder auf', () => {
+  it('Ente ist in Invisible für die ersten ~35% sichtbar, taucht dann unter und erscheint am Zielpunkt wieder', () => {
+    const traj = trajectoryForTrial(SEED, 0, 50);
     const { container } = render(
       <StrictMode>
         <AnticipationInvisible ageGroup={4} seed={SEED} onComplete={() => {}} onCancel={() => {}} />
       </StrictMode>,
     );
 
-    // 1. Zu Beginn (t = 0 ms, progress = 0 < 0.38): Ente ist in der Zielspur sichtbar, Seerosen-Abdeckung vorhanden
+    // 1. Anfangs sichtbar, Teichabdeckung vorhanden
     expect(container.querySelector('[data-testid="anticipation-duck"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="lily-cover-0"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="pond-cover"]')).not.toBeNull();
 
-    // 2. Kurz nach 38% der Strecke (t = 1400 ms, progress = 1400/3600 ≈ 0.389 >= 0.38): Ente ist untergetaucht
+    // 2. Bei ~36% der Strecke (nach 1312ms / 3600ms ≈ 0.364 >= 0.35): abgetaucht
     act(() => {
-      vi.advanceTimersByTime(1400);
+      vi.advanceTimersByTime(1312);
     });
-    expect(isDuckVisibleInPond('invisible', 'approaching', 1400 / TRAVEL_MS_L1)).toBe(false);
+    expect(isDuckVisibleInPond('invisible', 'approaching', 1312 / TRAVEL_MS_L1)).toBe(false);
     expect(container.querySelector('[data-testid="anticipation-duck"]')).toBeNull();
     expect(container.querySelector('[data-testid="duck-submerged-cue"]')).not.toBeNull();
+    expect(INVISIBLE_VISIBLE_PROGRESS_LIMIT).toBeCloseTo(0.35, 2);
 
-    // 3. Nach Ablauf der Schwimmphase (t = 3600 ms): Ente taucht unten am Ufer wieder auf
+    // 3. Bei Ankunft am Ufer: Ente taucht am Zielpunkt wieder auf
     act(() => {
-      vi.advanceTimersByTime(TRAVEL_MS_L1 - 1400);
+      vi.advanceTimersByTime(TRAVEL_MS_L1 - 1312 + 32);
     });
-    const surfacedDuck = container.querySelector<HTMLElement>('[data-testid="anticipation-duck"]');
-    expect(surfacedDuck).not.toBeNull();
-    expect(surfacedDuck?.style.top).toBe('82%');
-    expect(INVISIBLE_VISIBLE_PROGRESS_LIMIT).toBe(0.38);
+    const surfaced = getDuckPos(container);
+    expect(surfaced.x).toBeCloseTo(traj.target.x, 1);
+    expect(surfaced.y).toBeCloseTo(DUCK_TARGET_Y, 1);
   });
 
-  it('Bewegen der Katze mit Links/Rechts während approaching löst keinen Fehlversuch aus, sondern führt bei Ankunft zum Fangen', () => {
-    const target = targetLaneForTrial0(SEED);
+  it('Bewegen während approaching löst nichts vorzeitig aus; auch Fangen im Fangfenster nach Ankunft zählt', () => {
+    const traj = trajectoryForTrial(SEED, 0, 50);
     const { container } = render(
       <StrictMode>
         <AnticipationInvisible ageGroup={4} seed={SEED} onComplete={() => {}} onCancel={() => {}} />
       </StrictMode>,
     );
 
-    // Während die Ente noch schwimmt (approaching), bewegt das Kind die Katze zur Zielspur
-    const key = target > HOME_LANE ? 'ArrowRight' : 'ArrowLeft';
-    for (let i = 0; i < Math.abs(target - HOME_LANE); i++) press(key);
-
-    // Noch kein Trial beendet während approaching
-    expect(container.textContent).toContain('0 / 21');
-    expect(streakLabel(container)).toBe('0 von 3 Sternen bis zum nächsten Level');
-
-    // Sobald die Ente am Ufer ankommt, fängt die wartende Katze sie erfolgreich
+    // Bis kurz nach Ankunft warten (im Fangfenster)
     act(() => {
-      vi.advanceTimersByTime(TRAVEL_MS_L1);
+      vi.advanceTimersByTime(TRAVEL_MS_L1 + 100);
     });
+    expect(container.textContent).toContain('0 / 21');
+
+    // Jetzt erst die Katze innerhalb des Fangfensters zum Ufer-Zielpunkt steuern
+    moveCatToX(container, traj.target.x);
     expect(container.textContent).toContain('1 / 21');
     expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
   });
 });
 
-describe('Anticipation — Dynamische Spuren-Skalierung (Issue #14 & #45, Rueda 2005)', () => {
-  it('lanesForLevel liefert 5 Spuren für Level 1–3 und 7 Spuren für Level 4–7', () => {
-    expect(lanesForLevel(1)).toBe(5);
-    expect(lanesForLevel(2)).toBe(5);
-    expect(lanesForLevel(3)).toBe(5);
-    expect(lanesForLevel(4)).toBe(7);
-    expect(lanesForLevel(5)).toBe(7);
-    expect(lanesForLevel(6)).toBe(7);
-    expect(lanesForLevel(7)).toBe(7);
-  });
-
-  it('travelMsForLevel (3600->2400ms) und catchWindowMsForLevel (1600->1000ms) skalieren erreichbar mit steigendem Level', () => {
+describe('Anticipation — Timing, Erreichbarkeit & Trajektorien-Engine', () => {
+  it('travelMsForLevel (3600->2400ms) und catchWindowMsForLevel (1600->1000ms) erlauben volle Uferquerung', () => {
     expect(travelMsForLevel(1)).toBe(3600);
     expect(travelMsForLevel(7)).toBe(2400);
     expect(catchWindowMsForLevel(1)).toBe(1600);
     expect(catchWindowMsForLevel(7)).toBe(1000);
+
+    // Selbst bei kürzester Schwimmzeit (Level 7) erreicht die Katze von einer Ecke zur anderen jedes Ziel
+    const fullWidthTravelMs = ((CAT_MAX_X - CAT_MIN_X) / CAT_SPEED) * 1000;
+    expect(fullWidthTravelMs).toBeLessThan(travelMsForLevel(7));
   });
 
-  it('pickTargetLane wählt Zielspuren im gültigen Bereich [0, lanes) ungleich exclude', () => {
-    const rng = createRng('test-seed-target-lane');
+  it('pickDuckTrajectory erzeugt gültige, schräge Bahnen mit Abstand zur Katze', () => {
+    const rng = createRng('test-seed-trajectory');
     for (let i = 0; i < 50; i++) {
-      const target5 = pickTargetLane(rng, 5, 2);
-      expect(target5).toBeGreaterThanOrEqual(0);
-      expect(target5).toBeLessThan(5);
-      expect(target5).not.toBe(2);
-
-      const target7 = pickTargetLane(rng, 7, 3);
-      expect(target7).toBeGreaterThanOrEqual(0);
-      expect(target7).toBeLessThan(7);
-      expect(target7).not.toBe(3);
+      const traj = pickDuckTrajectory(rng, 50);
+      expect(traj.start.x).toBeGreaterThanOrEqual(12);
+      expect(traj.start.x).toBeLessThanOrEqual(88);
+      expect(traj.target.x).toBeGreaterThanOrEqual(12);
+      expect(traj.target.x).toBeLessThanOrEqual(88);
+      expect(Math.abs(traj.target.x - 50)).toBeGreaterThanOrEqual(18);
+      expect(Math.abs(traj.start.x - traj.target.x)).toBeGreaterThanOrEqual(12);
     }
-  });
-
-  it('rendert 5 Spuren in Level 1 und 7 Spuren in Level 4', () => {
-    const { container: containerL1, unmount: unmountL1 } = renderExercise(1);
-    const lanesL1 = containerL1.querySelectorAll('.aspect-\\[3\\/1\\]');
-    expect(lanesL1.length).toBe(5);
-    unmountL1();
-
-    const { container: containerL4, unmount: unmountL4 } = renderExercise(4);
-    const lanesL4 = containerL4.querySelectorAll('.aspect-\\[3\\/1\\]');
-    expect(lanesL4.length).toBe(7);
-    unmountL4();
   });
 });
 
-describe('Anticipation — Positionspersistenz der Katze über Trials (Issue #14)', () => {
-  it('Katze behält ihre Position über aufeinanderfolgende Trials und wird nicht auf das Zentrum zurückgesetzt', () => {
-    const { container } = renderExercise(1);
+describe('Anticipation — Positionspersistenz & stabiler 500ms-Flash', () => {
+  it('Katze bewegt sich stufenlos bis an die Ränder [5%, 95%] und behält ihre Position über Trials hinweg', () => {
+    const { container } = renderVisible(1);
+    expect(getCatX(container)).toBeCloseTo(50, 1);
 
-    // Initial startet Katze auf Spur 2 (Mitte von 5 Spuren: 2 * 20% = 40%)
-    const catHolder = () => container.querySelector('.animate-cat-hop')?.parentElement;
-    expect(catHolder()?.style.left).toBe('40%');
+    // Weit nach links bis an die Grenze CAT_MIN_X = 5%
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
+      vi.advanceTimersByTime(1200);
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowLeft' }));
+    });
+    expect(getCatX(container)).toBeCloseTo(CAT_MIN_X, 1);
 
-    // Katze um 2 Spuren nach rechts auf Spur 4 bewegen (4 * 20% = 80%)
-    press('ArrowRight');
-    press('ArrowRight');
-    expect(catHolder()?.style.left).toBe('80%');
+    // Zurück auf ca. 75% bewegen
+    moveCatToX(container, 75);
+    const savedX = getCatX(container);
+    expect(savedX).toBeGreaterThan(70);
 
-    // Trial 0 durch Zeitablauf verpassen lassen (Flash dauert 500ms)
+    // Trial 0 verpassen und 500ms Flash abwarten
     act(() => {
       vi.advanceTimersByTime(TRAVEL_MS_L1 + CATCH_WINDOW_MS_L1 + 100);
     });
-
-    // 500ms Flash ablaufen lassen, um Trial 1 zu starten
     act(() => {
       vi.advanceTimersByTime(500);
     });
 
-    // Trial 1 läuft: Counter zeigt 1/21, Katze MUSS weiterhin auf Spur 4 (80%) stehen!
     expect(container.textContent).toContain('1 / 21');
-    expect(catHolder()?.style.left).toBe('80%');
+    expect(getCatX(container)).toBeCloseTo(savedX, 1);
   });
 
-  it('erlaubt Bewegung über alle 7 Spuren (0..6) in Level 4', () => {
-    const { container } = renderExercise(4);
-    const catHolder = () => container.querySelector('.animate-cat-hop')?.parentElement;
-
-    // Startet in der Mitte von 7 Spuren (Spur 3: 3 * (100/7)%)
-    const tileW7 = 100 / 7;
-    expect(parseFloat(catHolder()?.style.left ?? '0')).toBeCloseTo(3 * tileW7, 1);
-
-    // 3x nach links auf Spur 0 bewegen
-    press('ArrowLeft');
-    press('ArrowLeft');
-    press('ArrowLeft');
-    expect(parseFloat(catHolder()?.style.left ?? '0')).toBeCloseTo(0, 1);
-
-    // Weitere Linksbewegung wird an Grenze 0 abgefangen
-    press('ArrowLeft');
-    expect(parseFloat(catHolder()?.style.left ?? '0')).toBeCloseTo(0, 1);
-
-    // 6x nach rechts auf Spur 6 bewegen
-    for (let i = 0; i < 6; i++) press('ArrowRight');
-    expect(parseFloat(catHolder()?.style.left ?? '0')).toBeCloseTo(6 * tileW7, 1);
-
-    // Weitere Rechtsbewegung wird an Grenze 6 (7-1) abgefangen
-    press('ArrowRight');
-    expect(parseFloat(catHolder()?.style.left ?? '0')).toBeCloseTo(6 * tileW7, 1);
-  });
-});
-
-describe('Anticipation — Spalten-Deckungsgleichheit & stabiler Level-Übergang während Flash (Issue #41)', () => {
-  it('aboveGrid und GridWorld nutzen identisches minmax(0, 1fr) Spalten-Template und min-w-0 auf allen Spur-Zellen (Level 1 & Level 4)', () => {
-    for (const [level, expectedLanes] of [
-      [1, 5],
-      [4, 7],
-    ] as const) {
-      const { container, unmount } = renderExercise(level);
-      const laneCells = Array.from(container.querySelectorAll<HTMLElement>('.aspect-\\[3\\/1\\]'));
-      expect(laneCells.length).toBe(expectedLanes);
-
-      for (const cell of laneCells) {
-        expect(cell.className).toContain('min-w-0');
-        expect(cell.className).toContain('overflow-hidden');
-        expect(cell.className).not.toContain('rounded-xl');
-      }
-
-      const aboveGridEl = laneCells[0]?.parentElement;
-      expect(container.querySelector('[data-testid="anticipation-lanes"]')).toBe(aboveGridEl);
-      expect(aboveGridEl?.style.gridTemplateColumns).toBe(`repeat(${expectedLanes}, minmax(0, 1fr))`);
-      expect(aboveGridEl?.className).toContain('border-4');
-      expect(aboveGridEl?.className).not.toContain('gap-2');
-
-      const gridWorldInner = container.querySelector<HTMLElement>('.aspect-square > .grid');
-      expect(gridWorldInner?.style.gridTemplateColumns).toBe(`repeat(${expectedLanes}, minmax(0, 1fr))`);
-      expect(gridWorldInner?.children.length).toBe(expectedLanes);
-      for (const tile of Array.from(gridWorldInner?.children ?? [])) {
-        expect((tile as HTMLElement).className).toContain('min-w-0');
-      }
-
-      unmount();
-    }
-  });
-
-  it('hält beim Level-Up von Level 3 auf Level 4 während der 500ms Flash-Phase die 5 Spuren und die getroffene Zielspur stabil und wechselt erst nach Flash-Ende auf 7 Spuren', () => {
-    // Starte in Level 3 mit streak = 2 (nächster Treffer löst Level-Up auf Level 4 aus)
-    const initialState = { ...createExerciseProgress(), level: 3, streak: 2 };
-    const { container } = render(
-      <StrictMode>
-        <AnticipationVisible ageGroup={4} seed={SEED} initialState={initialState} onComplete={() => {}} onCancel={() => {}} />
-      </StrictMode>,
-    );
-
-    const target = targetLaneForTrial0(SEED);
+  it('friert Ente und Level während der 500ms-Flash-Phase beim Level-Up (3 -> 4) ein', () => {
+    const traj = trajectoryForTrial(SEED, 0, 50);
     const travelMsL3 = travelMsForLevel(3);
+    const { container } = renderVisible(3, 2);
 
-    // Katze von Spur 2 in die Zielspur bewegen
-    const key = target > HOME_LANE ? 'ArrowRight' : 'ArrowLeft';
-    for (let i = 0; i < Math.abs(target - HOME_LANE); i++) press(key);
-
-    // Bis zum Auftauchen der Ente vorspulen -> Treffer & Level-Up auf Level 4, Flash (500ms) startet
+    const spentMs = moveCatToX(container, traj.target.x);
     act(() => {
-      vi.advanceTimersByTime(travelMsL3);
+      vi.advanceTimersByTime(travelMsL3 - spentMs + 32);
     });
 
-    // Während der 500ms Flash-Phase müssen noch 5 Spuren gerendert werden (kein verfrühter Sprung auf 7 Spuren!)
-    expect(container.querySelectorAll('.aspect-\\[3\\/1\\]').length).toBe(5);
-    expect(container.querySelectorAll('.aspect-square > .grid > div').length).toBe(5);
-    // Und die aufgetauchte Ente in der getroffenen Zielspur bleibt während des Jubels sichtbar
-    const laneCellsDuringFlash = container.querySelectorAll('.aspect-\\[3\\/1\\]');
-    expect(laneCellsDuringFlash[target]?.textContent).toContain('🦆');
+    // Während des 500ms-Flashs bleibt die getroffene Ente am Zielpunkt eingefroren
+    expect(container.textContent).toContain('😸');
+    const flashDuck = getDuckPos(container);
+    expect(flashDuck.x).toBeCloseTo(traj.target.x, 1);
+    expect(flashDuck.y).toBeCloseTo(DUCK_TARGET_Y, 1);
 
-    // Nach 400ms (immer noch im 500ms Flash): weiterhin 5 Spuren
     act(() => {
       vi.advanceTimersByTime(400);
     });
-    expect(container.querySelectorAll('.aspect-\\[3\\/1\\]').length).toBe(5);
+    expect(getDuckPos(container).y).toBeCloseTo(DUCK_TARGET_Y, 1);
 
-    // Nach Ablauf der restlichen 100ms (insgesamt 500ms FLASH_MS): Übergang auf 7 Spuren für den neuen Trial in Level 4
+    // Nach Ablauf von insgesamt 500ms startet der nächste Trial in Level 4 oben am Teich
     act(() => {
-      vi.advanceTimersByTime(100);
+      vi.advanceTimersByTime(150);
     });
-    expect(container.querySelectorAll('.aspect-\\[3\\/1\\]').length).toBe(7);
-    expect(container.querySelectorAll('.aspect-square > .grid > div').length).toBe(7);
+    expect(container.textContent).toContain('Level 4');
+    expect(getDuckPos(container).y).toBeLessThan(20);
   });
 });
-
-
-

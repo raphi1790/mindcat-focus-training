@@ -2,247 +2,151 @@
 import { StrictMode, act } from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTrialRng } from '../../../platform/rng';
 import { createExerciseProgress } from '../../engine/exerciseProgress';
-import { stepIntervalForLevel, type Pos } from './collision';
 import ChaseExercise from './ChaseExercise';
-
-/**
- * AP1/Befund A (Fix-Plan Testrunde 1): `endTrial` lag in State-Updatern, die
- * React unter StrictMode doppelt aufruft → der erste korrekte Trial zählte
- * zwei Sterne. Dieser Test rendert die Übung bewusst **in StrictMode** und
- * prüft, dass ein Fang genau einen Trial zählt.
- *
- * Im Browser ist das nicht automatisierbar (die rAF-Schleife von
- * useDirectionalInput läuft im Preview-Tab nicht) — hier steuern wir die
- * Frames manuell, wie in MazeExercise.test.tsx.
- */
-
-let rafQueue: FrameRequestCallback[] = [];
-
-function flushFrame(timeAdvanceMs = 200) {
-  vi.advanceTimersByTime(timeAdvanceMs);
-  const queue = rafQueue;
-  rafQueue = [];
-  for (const cb of queue) cb(performance.now());
-}
+import { timeLimitForLevel } from './collision';
 
 beforeEach(() => {
   vi.useFakeTimers();
-  rafQueue = [];
-  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-    rafQueue.push(cb);
-    return rafQueue.length;
-  });
-  vi.stubGlobal('cancelAnimationFrame', () => {});
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  vi.unstubAllGlobals();
 });
 
-// Spiegelt GRID_SIZE/centerPos aus ChaseExercise.tsx.
-const GRID_SIZE = 8;
-const CENTER: Pos = { x: Math.floor(GRID_SIZE / 2), y: Math.floor(GRID_SIZE / 2) };
-/**
- * Seed bewusst so gewählt, dass der Schirm direkt neben der Katze startet:
- * Ein einziger Zug genügt, der Fang passiert also lange vor dem ersten
- * Schirm-Schritt (700 ms auf Level 1) — kein timing-abhängiger Test.
- */
-const SEED = 'ap1-chase-0';
-
-/** Spiegelt randomPos() aus ChaseExercise.tsx für Trial 0. */
-function targetPosForTrial0(seed: string): Pos {
-  const rng = createTrialRng(seed, 0);
-  let pos: Pos;
-  let guard = 0;
-  do {
-    pos = { x: rng.int(0, GRID_SIZE), y: rng.int(0, GRID_SIZE) };
-    guard += 1;
-  } while (pos.x === CENTER.x && pos.y === CENTER.y && guard < 20);
-  return pos;
-}
-
-/** Einen (ggf. diagonalen) Zug ausführen: alle Richtungstasten gleichzeitig. */
-function pressDirection(dx: number, dy: number) {
-  const keys: string[] = [];
-  if (dx > 0) keys.push('ArrowRight');
-  else if (dx < 0) keys.push('ArrowLeft');
-  if (dy > 0) keys.push('ArrowDown');
-  else if (dy < 0) keys.push('ArrowUp');
-
-  act(() => {
-    for (const key of keys) window.dispatchEvent(new KeyboardEvent('keydown', { key }));
-    flushFrame();
-  });
-  act(() => {
-    for (const key of keys) window.dispatchEvent(new KeyboardEvent('keyup', { key }));
-  });
-}
+const SEED = 'continuous-chase-seed';
 
 function streakLabel(container: HTMLElement): string | null {
   return container.querySelector('[aria-label*="Sternen"]')?.getAttribute('aria-label') ?? null;
 }
 
+function readPos(el: HTMLElement): { x: number; y: number } {
+  return { x: parseFloat(el.style.left), y: parseFloat(el.style.top) };
+}
 
-describe('ChaseExercise — kein Doppelzählen unter StrictMode (AP1/Befund A)', () => {
-  it('erster richtiger Fang füllt genau 1 Stern (nicht 2)', () => {
-    const target = targetPosForTrial0(SEED);
-    const dx = target.x - CENTER.x;
-    const dy = target.y - CENTER.y;
-    // Vorbedingung des gewählten Seeds: ein einziger Zug reicht zum Schirm.
-    expect(Math.max(Math.abs(dx), Math.abs(dy))).toBe(1);
+/** Steuert die Katze in 50ms-Schritten auf den sichtbaren Regenschirm zu, bis er gefangen wird. */
+function chaseUntilCaught(getByTestId: (id: string) => HTMLElement, maxSteps = 120) {
+  for (let i = 0; i < maxSteps; i++) {
+    const cat = getByTestId('arena-cat');
+    if (cat.textContent?.includes('😸')) return;
 
-    const { container } = render(
+    const catPos = readPos(cat);
+    const targetPos = readPos(getByTestId('chase-umbrella'));
+    const keys: string[] = [];
+    if (targetPos.x - catPos.x > 1.5) keys.push('ArrowRight');
+    else if (catPos.x - targetPos.x > 1.5) keys.push('ArrowLeft');
+    if (targetPos.y - catPos.y > 1.5) keys.push('ArrowDown');
+    else if (catPos.y - targetPos.y > 1.5) keys.push('ArrowUp');
+
+    act(() => {
+      for (const k of keys) window.dispatchEvent(new KeyboardEvent('keydown', { key: k }));
+      vi.advanceTimersByTime(50);
+      for (const k of keys) window.dispatchEvent(new KeyboardEvent('keyup', { key: k }));
+    });
+  }
+  throw new Error('Katze konnte den Schirm innerhalb maxSteps nicht fangen');
+}
+
+describe('ChaseExercise — Kontinuierliche Arena & StrictMode', () => {
+  it('fängt den Schirm per Hitbox-Überlappung und zählt unter StrictMode genau 1 Stern', () => {
+    const { container, getByTestId } = render(
       <StrictMode>
         <ChaseExercise ageGroup={4} seed={SEED} onComplete={() => {}} onCancel={() => {}} />
       </StrictMode>,
     );
+
     expect(streakLabel(container)).toBe('0 von 3 Sternen bis zum nächsten Level');
-
-    pressDirection(dx, dy);
-
+    chaseUntilCaught(getByTestId);
     expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
   });
-});
 
-describe('ChaseExercise — Schirm-Schritt-Kollision & AP2', () => {
-  function findSeedForTarget(predicate: (pos: Pos) => boolean): string {
-    for (let i = 0; i < 1000; i++) {
-      const s = `seed-ap2-${i}`;
-      if (predicate(targetPosForTrial0(s))) return s;
-    }
-    throw new Error('Kein passender Seed gefunden');
-  }
-
-  function findSeedWhereTargetStepsOntoCat(): string {
-    const stepOptions = [
-      { x: 0, y: -1 },
-      { x: 0, y: 1 },
-      { x: -1, y: 0 },
-      { x: 1, y: 0 },
-      { x: -1, y: -1 },
-      { x: 1, y: -1 },
-      { x: -1, y: 1 },
-      { x: 1, y: 1 },
-      { x: 0, y: 0 },
-    ];
-
-    for (let i = 0; i < 2000; i++) {
-      const s = `seed-step-cat-${i}`;
-      const trialRng = createTrialRng(s, 0);
-
-      // Reproduziere setupTrial:
-      let pos: Pos;
-      let guard = 0;
-      do {
-        pos = { x: trialRng.int(0, GRID_SIZE), y: trialRng.int(0, GRID_SIZE) };
-        guard += 1;
-      } while (pos.x === CENTER.x && pos.y === CENTER.y && guard < 20);
-
-      // Reproduziere ersten stepRandomly im stepInterval:
-      const choice = trialRng.pick(stepOptions);
-      const nextTarget = {
-        x: Math.min(Math.max(pos.x + choice.x, 0), GRID_SIZE - 1),
-        y: Math.min(Math.max(pos.y + choice.y, 0), GRID_SIZE - 1),
-      };
-
-      if (nextTarget.x === CENTER.x && nextTarget.y === CENTER.y) {
-        return s;
-      }
-    }
-    throw new Error('Kein passender Seed für Schirmschritt auf Katze gefunden');
-  }
-
-  it('erkennt Fang wenn Schirm auf die stehende Katze zieht (stepInterval Collision Check)', () => {
-    const seed = findSeedWhereTargetStepsOntoCat();
-
-    const { container } = render(
-      <ChaseExercise ageGroup={4} seed={seed} onComplete={() => {}} onCancel={() => {}} />,
+  it('bewegt den Schirm kontinuierlich innerhalb 0..100 % und meldet Timeout nach Zeitlimit', () => {
+    const { container, getByTestId } = render(
+      <ChaseExercise ageGroup={4} seed={SEED} onComplete={() => {}} onCancel={() => {}} />,
     );
 
-    expect(streakLabel(container)).toBe('0 von 3 Sternen bis zum nächsten Level');
-
-    // Keine Tastatureingabe — wir warten einfach auf den ersten Schirm-Schritt (700 ms bei Level 1)
+    const startPos = readPos(getByTestId('chase-umbrella'));
     act(() => {
-      vi.advanceTimersByTime(700);
+      vi.advanceTimersByTime(250);
     });
+    const movedPos = readPos(getByTestId('chase-umbrella'));
+    expect(Math.hypot(movedPos.x - startPos.x, movedPos.y - startPos.y)).toBeGreaterThan(1);
+    expect(movedPos.x).toBeGreaterThanOrEqual(0);
+    expect(movedPos.x).toBeLessThanOrEqual(100);
+    expect(movedPos.y).toBeGreaterThanOrEqual(0);
+    expect(movedPos.y).toBeLessThanOrEqual(100);
 
-    expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
-  });
-
-  it('fängt den Schirm auf einem Zwischenfeld bei einem Diagonalschritt', () => {
-    // Schirm steht auf (5, 4) — direkt rechts von der Katze (4, 4)
-    const seed = findSeedForTarget((pos) => pos.x === 5 && pos.y === 4);
-
-    const { container } = render(
-      <ChaseExercise ageGroup={4} seed={seed} onComplete={() => {}} onCancel={() => {}} />,
-    );
-
+    // Restzeit bis Timeout ablaufen lassen
+    act(() => {
+      vi.advanceTimersByTime(timeLimitForLevel(1));
+    });
+    expect(getByTestId('arena-cat').textContent).toContain('🙀');
     expect(streakLabel(container)).toBe('0 von 3 Sternen bis zum nächsten Level');
 
-    // Katze bewegt sich diagonal nach unten-rechts (dx: 1, dy: 1) von (4, 4) nach (5, 5)
-    // Das überstrichene Zwischenfeld (prev.x + dx, prev.y) ist (5, 4) -> Schirm getroffen!
-    pressDirection(1, 1);
-
-    expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
+    // Nach 500ms FLASH_MS startet der nächste Trial in der Mitte
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    const resetCat = getByTestId('arena-cat');
+    expect(resetCat.textContent).toContain('🐱');
+    expect(resetCat.style.left).toBe('50%');
+    expect(resetCat.style.top).toBe('50%');
   });
 
-  it('zeigt Geschwindigkeits-Icon (⚡) im HUD ab Level 2 an', () => {
-    const { container } = render(
+  it('hält die Katze beim Catch für die vollen 500ms FLASH_MS auf der Schirm-Position (Issue #44)', () => {
+    const { getByTestId } = render(
+      <ChaseExercise ageGroup={4} seed={SEED} onComplete={() => {}} onCancel={() => {}} />,
+    );
+
+    chaseUntilCaught(getByTestId);
+
+    const umbrella = getByTestId('chase-umbrella');
+    const catDuringFlash = getByTestId('arena-cat');
+    expect(catDuringFlash.textContent).toContain('😸');
+    expect(catDuringFlash.style.left).toBe(umbrella.style.left);
+    expect(catDuringFlash.style.top).toBe(umbrella.style.top);
+
+    // Nach 400ms (noch in der 500ms-Feierphase) steht die Katze weiterhin am Fangort
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(getByTestId('arena-cat').textContent).toContain('😸');
+    expect(getByTestId('arena-cat').style.left).toBe(umbrella.style.left);
+    expect(getByTestId('arena-cat').style.top).toBe(umbrella.style.top);
+
+    // Erst nach Ablauf der vollen 500ms startet der nächste Trial bei (50%, 50%)
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(getByTestId('arena-cat').textContent).toContain('🐱');
+    expect(getByTestId('arena-cat').style.left).toBe('50%');
+    expect(getByTestId('arena-cat').style.top).toBe('50%');
+  });
+
+  it('zeigt Geschwindigkeits-Icon (⚡ / 💨⚡) und Wind-Schirm (💨🌂) auf höheren Leveln', () => {
+    const level2 = render(
       <ChaseExercise
         ageGroup={4}
         seed={SEED}
-        initialState={{ ...createExerciseProgress(), level: 2 }}
+        initialState={{ ...createExerciseProgress(2), level: 2 }}
         onComplete={() => {}}
         onCancel={() => {}}
       />,
     );
+    expect(level2.container.textContent).toContain('⚡');
+    cleanup();
 
-    expect(container.textContent).toContain('⚡');
-  });
-
-  it('setzt die Katze beim Catch sichtbar für 500ms auf das Zielfeld des Regenschirms bevor der nächste Trial startet (Issue #44)', () => {
-    // Schirm steht auf (5, 4) — direkt rechts von der Katze (4, 4)
-    const seed = findSeedForTarget((pos) => pos.x === 5 && pos.y === 4);
-
-    const { container } = render(
-      <ChaseExercise ageGroup={4} seed={seed} onComplete={() => {}} onCancel={() => {}} />,
+    const level4 = render(
+      <ChaseExercise
+        ageGroup={4}
+        seed={SEED}
+        initialState={{ ...createExerciseProgress(4), level: 4 }}
+        onComplete={() => {}}
+        onCancel={() => {}}
+      />,
     );
-
-    // Katze bewegt sich diagonal (dx: 1, dy: 1) und fängt den Schirm auf (5, 4) via Swept-Volume
-    pressDirection(1, 1);
-
-    // Während der 500ms Feierphase (flash === 'success') zeigt die Katze '😸'
-    // und sitzt sichtbar auf dem Feld des Regenschirms (5, 4) statt auf (4, 4) zurückzuspringen:
-    const catSpanDuringFlash = Array.from(container.querySelectorAll('span')).find(
-      (el) => el.textContent === '😸',
-    );
-    expect(catSpanDuringFlash).toBeDefined();
-    const catWrapperDuringFlash = catSpanDuringFlash?.parentElement;
-    // Bei 8x8 Gitter ist tileW = 12.5%; x=5 -> left: 62.5%, y=4 -> top: 50%
-    expect(catWrapperDuringFlash?.style.left).toBe('62.5%');
-    expect(catWrapperDuringFlash?.style.top).toBe('50%');
-
-    // Erst nach Ablauf der 500ms FLASH_MS startet der nächste Trial und setzt die Katze auf (4, 4) (50%, 50%) zurück:
-    act(() => {
-      vi.advanceTimersByTime(500);
-    });
-    const catSpanAfterFlash = Array.from(container.querySelectorAll('span')).find(
-      (el) => el.textContent === '🐱',
-    );
-    const catWrapperAfterFlash = catSpanAfterFlash?.parentElement;
-    expect(catWrapperAfterFlash?.style.left).toBe('50%');
-    expect(catWrapperAfterFlash?.style.top).toBe('50%');
-  });
-
-  it('verkürzt das Schritt-Intervall über die Levels spürbar (Issue #44)', () => {
-    expect(stepIntervalForLevel(1)).toBe(700);
-    expect(stepIntervalForLevel(4)).toBe(475);
-    expect(stepIntervalForLevel(7)).toBe(250);
+    expect(level4.container.textContent).toContain('💨⚡');
+    expect(level4.container.textContent).toContain('💨🌂');
   });
 });
-
-
