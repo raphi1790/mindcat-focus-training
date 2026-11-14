@@ -1,67 +1,53 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useDirectionalInput } from '../../../platform/input';
+import { useContinuousDirection } from '../../../platform/input';
 import { createTrialRng, type Rng } from '../../../platform/rng';
+import type { TrialFlash } from '../../../ui';
 import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
-import GridWorld from '../../shared/GridWorld';
+import ArenaWorld from '../../shared/ArenaWorld';
+import { clampPos, useAnimationLoop, type Vec2 } from '../../shared/arenaMath';
 import type { ExerciseProps } from '../../types';
-import { checkChaseCollision, stepIntervalForLevel, stepUmbrella, type Pos } from './collision';
+import {
+  CAT_RADIUS,
+  CAT_SIZE,
+  CAT_SPEED,
+  CHASE_CENTER,
+  UMBRELLA_SIZE,
+  checkChaseOverlap,
+  chooseUmbrellaDirection,
+  spawnUmbrellaPos,
+  stepUmbrellaContinuous,
+  timeLimitForLevel,
+} from './collision';
 
 /**
  * Chase (Plan §6.2, Übung 2): Verfolgung/Sustained Attention. a=7, b=21, c=3.
- * Ein Regenschirm macht in festem Intervall einen Schritt (mit Level-abhängigem
- * Flucht-Bias); die Katze muss ihn innerhalb eines Pro-Trial-Zeitfensters
- * erreichen. Level ↑ = kürzeres Zeitfenster, schnellere Schirm-Schritte und
- * höherer Flucht-Bias (Gittergröße bleibt konstant).
+ * Ein Regenschirm bewegt sich kontinuierlich entlang von 2D-Vektoren (`0..100 %`),
+ * prallt an Rändern ab und passt seine Richtung periodisch mit Level-abhängigem
+ * Flucht-Bias an; die Katze verfolgt ihn stufenlos in 8 Richtungen.
  */
 const CONFIG = EXERCISE_CONFIGS.chase;
-const GRID_SIZE = 8;
 const FLASH_MS = 500;
-const TICK_MS = 100;
-
-function centerPos(): Pos {
-  return { x: Math.floor(GRID_SIZE / 2), y: Math.floor(GRID_SIZE / 2) };
-}
-
-function timeLimitForLevel(level: number): number {
-  return Math.max(4200, 9000 - (level - 1) * 800);
-}
-
-function randomPos(rng: Rng, exclude: Pos): Pos {
-  let pos: Pos;
-  let guard = 0;
-  do {
-    pos = { x: rng.int(0, GRID_SIZE), y: rng.int(0, GRID_SIZE) };
-    guard += 1;
-  } while (pos.x === exclude.x && pos.y === exclude.y && guard < 20);
-  return pos;
-}
 
 export default function ChaseExercise({ seed, onComplete, onCancel, initialState, onLevelUp }: ExerciseProps) {
   const { state, recordTrial } = useExerciseEngine('chase', CONFIG, onComplete, { initialState, onLevelUp });
   const [trialId, setTrialId] = useState(0);
-  const [catPos, setCatPos] = useState<Pos>(centerPos);
-  // Platzhalter — die Trial-Setup-Effekt-Funktion platziert den Schirm beim
-  // Mount sofort neu (seeded RNG darf nicht während des Renders gelesen werden).
-  const [targetPos, setTargetPos] = useState<Pos>({ x: 0, y: 0 });
-  const [flash, setFlash] = useState<'success' | 'error' | null>(null);
+  const [catPos, setCatPos] = useState<Vec2>(() => ({ ...CHASE_CENTER }));
+  // Platzhalter — `setupTrial()` setzt Position & Vektor beim Mount deterministisch via `createTrialRng`.
+  const [targetPos, setTargetPos] = useState<Vec2>({ x: 20, y: 20 });
+  const [flash, setFlash] = useState<TrialFlash>(null);
   const [remainingMs, setRemainingMs] = useState(() => timeLimitForLevel(initialState?.level ?? 1));
 
-  // Quelle der Wahrheit für Bewegung/Timer außerhalb von State-Updatern
-  // (React StrictMode ruft Updater-Funktionen im Dev-Modus doppelt auf —
-  // Seiteneffekte wie `endTrial` dürfen deshalb nie darin stehen).
-  const catPosRef = useRef(catPos);
-  const prevCatPosRef = useRef(catPos);
-  const targetPosRef = useRef(targetPos);
-  const prevTargetPosRef = useRef(targetPos);
+  const catPosRef = useRef<Vec2>(catPos);
+  const targetPosRef = useRef<Vec2>(targetPos);
+  const targetVelRef = useRef<Vec2>({ x: 1, y: 0 });
+  const turnTimerRef = useRef(0);
   const remainingRef = useRef(remainingMs);
+  const trialRngRef = useRef<Rng | null>(null);
   const gateRef = useRef(createTrialGate());
 
-  const updateCatPos = useCallback((pos: Pos) => {
-    prevCatPosRef.current = catPosRef.current;
-    catPosRef.current = pos;
-    setCatPos(pos);
-  }, []);
+  const inputEnabled = flash === null && !state.done;
+  const dirRef = useContinuousDirection({ enabled: inputEnabled });
 
   const endTrial = useCallback(
     (caught: boolean) => {
@@ -71,94 +57,84 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
     },
     [recordTrial],
   );
-  const endTrialRef = useRef(endTrial);
-  useEffect(() => {
-    endTrialRef.current = endTrial;
-  }, [endTrial]);
 
-  // Neuer Trial: Positionen setzen, Schirm-Schritt- und Zeitlimit-Timer starten.
+  // Neuer Trial: deterministische Schirm-Startposition, Richtungsvektor und Zeitlimit setzen.
   useEffect(() => {
     if (state.done || flash !== null) return;
 
-    // Eigene Rng-Instanz je Trial (AP3): Trial `state.totalTrials` ist damit
-    // für jedes Kind identisch, unabhängig davon, wie viele Schirm-Schritte
-    // frühere Trials verbraucht haben, und ein StrictMode-Doppellauf dieses
-    // Effekts erzeugt dieselbe Sequenz erneut statt sie zu verschieben.
     const trialRng = createTrialRng(seed, state.totalTrials);
+    trialRngRef.current = trialRng;
 
-    // In einer verschachtelten Funktion statt direkt im Effect-Body (vgl.
-    // ChildAnt.tsx' `run()`) — das Setup reagiert auf einen neuen Trial
-    // (externes Ereignis), keine reine Render-Ableitung.
     const setupTrial = () => {
       gateRef.current.reset();
-      const cat = centerPos();
-      prevCatPosRef.current = cat;
+      const cat = { ...CHASE_CENTER };
       catPosRef.current = cat;
       setCatPos(cat);
-      const target = randomPos(trialRng, cat);
-      prevTargetPosRef.current = target;
+
+      const target = spawnUmbrellaPos(cat, trialRng);
       targetPosRef.current = target;
       setTargetPos(target);
-      remainingRef.current = timeLimitForLevel(state.level);
-      setRemainingMs(remainingRef.current);
+
+      targetVelRef.current = chooseUmbrellaDirection(target, cat, state.level, trialRng);
+      turnTimerRef.current = 0;
+
+      const limit = timeLimitForLevel(state.level);
+      remainingRef.current = limit;
+      setRemainingMs(limit);
     };
     setupTrial();
+  }, [trialId, state.level, state.done, state.totalTrials, seed, flash]);
 
-    const stepMs = stepIntervalForLevel(state.level);
-    const stepInterval = setInterval(() => {
-      const prev = targetPosRef.current;
-      const cat = catPosRef.current;
-      const next = stepUmbrella(prev, cat, state.level, trialRng, GRID_SIZE);
-      prevTargetPosRef.current = prev;
-      targetPosRef.current = next;
-      setTargetPos(next);
+  // Kontinuierliche Bewegungs-, Kollisions- und Countdown-Schleife.
+  useAnimationLoop((dtMs) => {
+    const rng = trialRngRef.current;
+    if (!rng) return;
 
-      const prevCat = prevCatPosRef.current;
-      if (checkChaseCollision(prevCat, cat, prev, next)) {
-        updateCatPos(next);
-        endTrialRef.current(true);
-      }
-    }, stepMs);
+    const { dx, dy } = dirRef.current;
+    let nextCat = catPosRef.current;
+    if (dx !== 0 || dy !== 0) {
+      const catStep = (CAT_SPEED * dtMs) / 1000;
+      nextCat = clampPos(
+        { x: nextCat.x + dx * catStep, y: nextCat.y + dy * catStep },
+        CAT_RADIUS,
+        100 - CAT_RADIUS,
+      );
+      catPosRef.current = nextCat;
+      setCatPos(nextCat);
+    }
 
-    const tickInterval = setInterval(() => {
-      const next = remainingRef.current - TICK_MS;
-      remainingRef.current = Math.max(0, next);
-      setRemainingMs(remainingRef.current);
-      if (next <= 0) {
-        clearInterval(stepInterval);
-        clearInterval(tickInterval);
-        endTrialRef.current(false);
-      }
-    }, TICK_MS);
+    const umbrellaStep = stepUmbrellaContinuous(
+      targetPosRef.current,
+      targetVelRef.current,
+      nextCat,
+      state.level,
+      dtMs,
+      turnTimerRef.current,
+      rng,
+    );
+    targetPosRef.current = umbrellaStep.pos;
+    targetVelRef.current = umbrellaStep.vel;
+    turnTimerRef.current = umbrellaStep.turnTimerMs;
+    setTargetPos(umbrellaStep.pos);
 
-    return () => {
-      clearInterval(stepInterval);
-      clearInterval(tickInterval);
-    };
-  }, [trialId, state.level, state.done, state.totalTrials, seed, flash, updateCatPos]);
+    if (checkChaseOverlap(nextCat, umbrellaStep.pos)) {
+      // Issue #44: Katze bleibt während des 500ms-Erfolgsflashs sichtbar auf dem gefangenen Schirm.
+      catPosRef.current = umbrellaStep.pos;
+      setCatPos(umbrellaStep.pos);
+      endTrial(true);
+      return;
+    }
 
-  const handleMove = useCallback(
-    ({ dx, dy }: { dx: number; dy: number }) => {
-      if (flash !== null) return;
-      const prev = catPosRef.current;
-      const next = {
-        x: Math.min(Math.max(prev.x + dx, 0), GRID_SIZE - 1),
-        y: Math.min(Math.max(prev.y + dy, 0), GRID_SIZE - 1),
-      };
-
-      const target = targetPosRef.current;
-      const prevTarget = prevTargetPosRef.current;
-      if (checkChaseCollision(prev, next, prevTarget, target)) {
-        updateCatPos(target);
-        endTrialRef.current(true);
-        return;
-      }
-      updateCatPos(next);
-    },
-    [flash, updateCatPos],
-  );
-
-  useDirectionalInput(handleMove, { enabled: flash === null && !state.done, repeatDelayMs: 150 });
+    const prevRemaining = remainingRef.current;
+    const nextRemaining = Math.max(0, prevRemaining - dtMs);
+    remainingRef.current = nextRemaining;
+    if (Math.ceil(nextRemaining / 100) !== Math.ceil(prevRemaining / 100) || nextRemaining === 0) {
+      setRemainingMs(nextRemaining);
+    }
+    if (nextRemaining <= 0) {
+      endTrial(false);
+    }
+  }, inputEnabled);
 
   useEffect(() => {
     if (flash === null) return;
@@ -176,17 +152,13 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
   const umbrellaEmoji = state.level >= 3 ? '💨🌂' : '🌂';
 
   return (
-    <GridWorld
-      cols={GRID_SIZE}
-      rows={GRID_SIZE}
-      tileAt={(x, y) => (x === targetPos.x && y === targetPos.y ? 'target' : 'path')}
-      tileEmoji={(x, y) => (x === targetPos.x && y === targetPos.y ? umbrellaEmoji : null)}
+    <ArenaWorld
       catPos={catPos}
+      catSize={CAT_SIZE}
       flash={flash}
       level={state.level}
       streak={{ current: state.streak, target: CONFIG.advanceStreak }}
       counter={counterText}
-      catEmoji="🐱"
       instructions={
         <>
           Fang den Schirm (🌂), bevor er wegläuft!
@@ -195,6 +167,20 @@ export default function ChaseExercise({ seed, onComplete, onCancel, initialState
         </>
       }
       onExit={onCancel}
-    />
+    >
+      <div
+        data-testid="chase-umbrella"
+        className="absolute flex items-center justify-center text-2xl sm:text-4xl pointer-events-none"
+        style={{
+          width: `${UMBRELLA_SIZE}%`,
+          height: `${UMBRELLA_SIZE}%`,
+          left: `${targetPos.x}%`,
+          top: `${targetPos.y}%`,
+          transform: 'translate(-50%, -50%)',
+        }}
+      >
+        <span className="animate-pop">{umbrellaEmoji}</span>
+      </div>
+    </ArenaWorld>
   );
 }
