@@ -3,10 +3,11 @@ import { circleRectOverlap, type Rect, type Vec2 } from '../../shared/arenaMath'
 /**
  * Side-Übung nach Rueda et al. (2005): motorische Kontrolle in einer offenen Arena (`0..100 %`).
  * - Katze startet in der sicheren Arena-Mitte `{ x: 50, y: 50 }` (auch bei Level-Resume).
- * - Randstreifen (Gras = Ziel, Schlamm = Fehler) umgeben das offene Zentrum.
+ * - Randstreifen (Gras = Ziel, Schlamm = Fehler) umgeben das Zentrum.
  * - Level 1: Gras an allen 4 Seiten (kein Schlamm).
  * - Level 2–7: Grasfläche schrumpft streng monoton bis zu einem schmalen Zielfeld,
- *   während Schlamm streng monoton wächst.
+ *   während Rand-Schlamm wächst. Ab Level 3 blockieren zusätzliche Schlammpfützen
+ *   im Innenbereich den direkten Weg zum Gras und erfordern aktives Umsteuern.
  */
 
 export const SIDE_CAT_SIZE = 10;
@@ -18,6 +19,7 @@ export interface SideLevelLayout {
   level: number;
   grass: readonly Rect[];
   mud: readonly Rect[];
+  puddles: readonly Rect[];
   start: Vec2;
 }
 
@@ -33,30 +35,40 @@ export const SIDE_LEVELS: Record<number, SideLevelLayout> = {
     level: 1,
     grass: [EDGE_TOP, EDGE_BOTTOM, EDGE_LEFT, EDGE_RIGHT],
     mud: [],
+    puddles: [],
     start: SIDE_START_POS,
   },
-  // Level 2: Gras auf 3 Seiten (2600), Schlamm unten (1000)
+  // Level 2: Gras auf 3 Seiten (2600), Schlamm unten (1000), freier Innenbereich zum Einstieg
   2: {
     level: 2,
     grass: [EDGE_TOP, EDGE_LEFT, EDGE_RIGHT],
     mud: [EDGE_BOTTOM],
+    puddles: [],
     start: SIDE_START_POS,
   },
-  // Level 3: Gras auf 2 Seiten (1800), Schlamm auf 2 Seiten (1800)
+  // Level 3: Gras auf 2 Seiten (1800), je 1 Schlammpfütze auf direktem Weg nach oben und rechts
   3: {
     level: 3,
     grass: [EDGE_TOP, EDGE_RIGHT],
     mud: [EDGE_BOTTOM, EDGE_LEFT],
+    puddles: [
+      { x: 43, y: 22, width: 14, height: 12 },
+      { x: 66, y: 43, width: 12, height: 14 },
+    ],
     start: SIDE_START_POS,
   },
-  // Level 4: Gras auf 1 ganzen Seite unten (1000), Schlamm auf 3 Seiten (2600)
+  // Level 4: Gras auf 1 ganzen Seite unten (1000), breite Mittelpfütze + Seitenhindernis
   4: {
     level: 4,
     grass: [EDGE_BOTTOM],
     mud: [EDGE_TOP, EDGE_LEFT, EDGE_RIGHT],
+    puddles: [
+      { x: 36, y: 62, width: 34, height: 12 },
+      { x: 10, y: 42, width: 14, height: 14 },
+    ],
     start: SIDE_START_POS,
   },
-  // Level 5: 60 % Gras links (600), Rest Schlamm (3000)
+  // Level 5: 60 % Gras links (600), versetzte Pfützen blockieren direkten Linksweg
   5: {
     level: 5,
     grass: [{ x: 0, y: 20, width: B, height: 60 }],
@@ -67,9 +79,13 @@ export const SIDE_LEVELS: Record<number, SideLevelLayout> = {
       { x: 0, y: B, width: B, height: 20 - B },
       { x: 0, y: 80, width: B, height: 90 - 80 },
     ],
+    puddles: [
+      { x: 24, y: 33, width: 13, height: 34 },
+      { x: 47, y: 75, width: 16, height: 15 },
+    ],
     start: SIDE_START_POS,
   },
-  // Level 6: 40 % Gras rechts (400), Rest Schlamm (3200)
+  // Level 6: 40 % Gras rechts (400), Barriere + Ober-/Unterhindernisse für Slalom nach rechts
   6: {
     level: 6,
     grass: [{ x: 100 - B, y: 30, width: B, height: 40 }],
@@ -80,9 +96,14 @@ export const SIDE_LEVELS: Record<number, SideLevelLayout> = {
       { x: 100 - B, y: B, width: B, height: 30 - B },
       { x: 100 - B, y: 70, width: B, height: 90 - 70 },
     ],
+    puddles: [
+      { x: 61, y: 32, width: 13, height: 36 },
+      { x: 32, y: 10, width: 16, height: 14 },
+      { x: 32, y: 76, width: 16, height: 14 },
+    ],
     start: SIDE_START_POS,
   },
-  // Level 7: 20 % Gras oben mittig (200), Rest Schlamm (3400)
+  // Level 7: 20 % Gras oben mittig (200), breite Top-Barriere + Seitenpfützen für Slalom nach oben
   7: {
     level: 7,
     grass: [{ x: 40, y: 0, width: 20, height: B }],
@@ -92,6 +113,11 @@ export const SIDE_LEVELS: Record<number, SideLevelLayout> = {
       EDGE_RIGHT,
       { x: 0, y: 0, width: 40, height: B },
       { x: 60, y: 0, width: 40, height: B },
+    ],
+    puddles: [
+      { x: 30, y: 22, width: 40, height: 13 },
+      { x: 10, y: 50, width: 16, height: 18 },
+      { x: 74, y: 50, width: 16, height: 18 },
     ],
     start: SIDE_START_POS,
   },
@@ -106,11 +132,13 @@ export function getStartPosition(level: number): Vec2 {
   return { ...getSideLayout(level).start };
 }
 
-/** Prüft, ob eine Position sicher (ohne Gras- oder Schlamm-Kontakt) liegt. */
+/** Prüft, ob eine Position sicher (ohne Gras-, Rand- oder Pfützen-Kontakt) liegt. */
 export function isSafeSidePosition(pos: Vec2, level: number, radius = SIDE_CAT_RADIUS): boolean {
   const layout = getSideLayout(level);
+  const overlaps = (r: Rect) => circleRectOverlap(pos, radius, r);
   return (
-    !layout.grass.some((r) => circleRectOverlap(pos, radius, r)) &&
-    !layout.mud.some((r) => circleRectOverlap(pos, radius, r))
+    !layout.grass.some(overlaps) &&
+    !layout.mud.some(overlaps) &&
+    !layout.puddles.some(overlaps)
   );
 }
