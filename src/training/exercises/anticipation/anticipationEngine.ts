@@ -1,16 +1,28 @@
 import type { Rng } from '../../../platform/rng';
+import type { Vec2 } from '../../shared/arenaMath';
 
-export type AnticipationPhase = 'approaching' | 'catchable' | 'arrived' | 'done';
+export type AnticipationPhase = 'approaching' | 'catchable';
 
-/** Visible portion of the pond swim in the invisible variant before diving under lily pads. */
-export const INVISIBLE_VISIBLE_PROGRESS_LIMIT = 0.38;
+/** Sichtbarer Streckenanteil in der Unsichtbar-Variante vor dem Abtauchen. */
+export const INVISIBLE_VISIBLE_PROGRESS_LIMIT = 0.35;
 
-/**
- * Dynamische Spuren-Skalierung nach Rueda et al. (2005):
- * Level 1–3: 5 Spuren, Level 4–7: 7 Spuren.
- */
-export function lanesForLevel(level: number): number {
-  return level >= 4 ? 7 : 5;
+export const POND_START_Y = 8;
+export const SHORE_TOP_Y = 82;
+export const DUCK_TARGET_Y = 86;
+export const CAT_SHORE_Y = 90;
+
+export const CAT_SIZE = 10;
+export const CAT_RADIUS = CAT_SIZE / 2;
+export const DUCK_CATCH_RADIUS = 6;
+export const CAT_MIN_X = CAT_RADIUS;
+export const CAT_MAX_X = 100 - CAT_RADIUS;
+
+/** Komfortable Ufer-Geschwindigkeit (%/s): volle Arena-Breite in ~1,64 s (< min. travelMs 2,4 s). */
+export const CAT_SPEED = 55;
+
+export interface DuckTrajectory {
+  start: Vec2;
+  target: Vec2;
 }
 
 /**
@@ -30,12 +42,12 @@ export function catchWindowMsForLevel(level: number): number {
 }
 
 /**
- * Prüft, ob die Ente in ihrer Teich-Spur aktuell sichtbar ist:
- * - Am Ufer (`catchable` / `arrived` / `done`) ist die Ente immer sichtbar.
+ * Prüft, ob die Ente im Teich aktuell sichtbar ist:
+ * - Am Ufer (`catchable`) ist die Ente immer sichtbar.
  * - Während des Anflugs (`approaching`):
- *   - `visible`: durchgehend auf der gesamten Schwimmstrecke sichtbar.
- *   - `invisible`: im oberen Bereich (`progress < 0.38`) sichtbar (Spur & Tempo erkennbar),
- *     taucht ab `progress >= 0.38` unter die Seerosen-Abdeckung ab.
+ *   - `visible`: durchgehend auf der gesamten Trajektorie sichtbar.
+ *   - `invisible`: für die ersten ~35 % sichtbar (Winkel & Tempo erkennbar),
+ *     taucht ab `progress >= 0.35` unter die Teichoberfläche ab.
  */
 export function isDuckVisibleInPond(
   variant: 'visible' | 'invisible' | boolean,
@@ -48,12 +60,40 @@ export function isDuckVisibleInPond(
   return progress < INVISIBLE_VISIBLE_PROGRESS_LIMIT;
 }
 
-export function pickTargetLane(rng: Rng, lanes: number, exclude: number): number {
-  let lane: number;
-  let guard = 0;
-  do {
-    lane = rng.int(0, lanes);
-    guard += 1;
-  } while (lane === exclude && guard < 20);
-  return lane;
+/**
+ * Wählt deterministisch eine geradlinige Teich-Trajektorie von `start` (oben)
+ * zu einem Ufer-Zielpunkt `target`, mit Abstand zur aktuellen Katzen-Position
+ * und merklichem Schrägwinkel über den Teich.
+ */
+export function pickDuckTrajectory(
+  rng: Rng,
+  excludeCatX: number,
+  minCatSeparation = 18,
+  minAngleDeltaX = 12,
+): DuckTrajectory {
+  let targetX = 50;
+  for (let i = 0; i < 20; i++) {
+    targetX = 12 + rng.next() * 76;
+    if (Math.abs(targetX - excludeCatX) >= minCatSeparation) break;
+  }
+
+  let startX = 50;
+  for (let i = 0; i < 20; i++) {
+    startX = 12 + rng.next() * 76;
+    if (Math.abs(startX - targetX) >= minAngleDeltaX) break;
+  }
+
+  return {
+    start: { x: startX, y: POND_START_Y },
+    target: { x: targetX, y: DUCK_TARGET_Y },
+  };
+}
+
+/** Berechnet die lineare Enten-Position auf der Trajektorie bei `progress ∈ [0, 1]`. */
+export function duckPositionAt(trajectory: DuckTrajectory, progress: number): Vec2 {
+  const p = Math.min(1, Math.max(0, progress));
+  return {
+    x: trajectory.start.x + (trajectory.target.x - trajectory.start.x) * p,
+    y: trajectory.start.y + (trajectory.target.y - trajectory.start.y) * p,
+  };
 }
