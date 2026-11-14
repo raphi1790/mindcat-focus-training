@@ -15,3 +15,5 @@ export { useConfirmInput } from './useConfirmInput';
 export type { ConfirmInputOptions } from './useConfirmInput';
 export { moveSelection, useArraySelectInput } from './useArraySelectInput';
 export type { ArraySelectInputOptions } from './useArraySelectInput';
+export { normalizeDirection, useContinuousDirection } from './useContinuousDirection';
+export type { ContinuousDirection, ContinuousDirectionOptions } from './useContinuousDirection';
