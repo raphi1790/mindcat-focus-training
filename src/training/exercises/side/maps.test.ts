@@ -30,7 +30,7 @@ describe('Side — Level-Layouts (Rueda 2005, kontinuierliche Arena)', () => {
     for (const level of LEVELS) {
       const layout = getSideLayout(level);
       expect(layout.grass.length).toBeGreaterThan(0);
-      for (const r of [...layout.grass, ...layout.mud]) {
+      for (const r of [...layout.grass, ...layout.mud, ...layout.puddles]) {
         expect(r.x).toBeGreaterThanOrEqual(0);
         expect(r.y).toBeGreaterThanOrEqual(0);
         expect(r.width).toBeGreaterThan(0);
@@ -41,13 +41,16 @@ describe('Side — Level-Layouts (Rueda 2005, kontinuierliche Arena)', () => {
     }
   });
 
-  it('Level 1 hat Gras an allen 4 Seiten und keinen Schlamm', () => {
+  it('Level 1–2 haben einen freien Innenbereich (keine Pfützen), Level 1 hat keinen Schlamm', () => {
     const level1 = getSideLayout(1);
+    const level2 = getSideLayout(2);
     expect(level1.grass).toHaveLength(4);
     expect(level1.mud).toHaveLength(0);
+    expect(level1.puddles).toHaveLength(0);
+    expect(level2.puddles).toHaveLength(0);
   });
 
-  it('Grasfläche schrumpft streng monoton über Level 1..7 während Schlamm wächst', () => {
+  it('Grasfläche schrumpft streng monoton über Level 1..7 während Rand-Schlamm wächst', () => {
     let prevGrass = Infinity;
     let prevMud = -1;
     const expectedBorderArea = 100 * 100 - (100 - 2 * SIDE_BORDER_THICKNESS) ** 2;
@@ -66,7 +69,7 @@ describe('Side — Level-Layouts (Rueda 2005, kontinuierliche Arena)', () => {
     }
   });
 
-  it('Gras- und Schlammstreifen überlappen einander nicht und lassen das Zentrum frei', () => {
+  it('Randstreifen lassen Zentrum frei; innere Pfützen liegen im Innenfeld und wachsen über Level 3..7', () => {
     const centerBox: Rect = {
       x: SIDE_BORDER_THICKNESS,
       y: SIDE_BORDER_THICKNESS,
@@ -74,41 +77,102 @@ describe('Side — Level-Layouts (Rueda 2005, kontinuierliche Arena)', () => {
       height: 100 - 2 * SIDE_BORDER_THICKNESS,
     };
 
+    let prevPuddleArea = 0;
     for (const level of LEVELS) {
-      const { grass, mud } = getSideLayout(level);
+      const { grass, mud, puddles } = getSideLayout(level);
       for (const g of grass) {
         expect(rectsOverlap(g, centerBox)).toBe(false);
         for (const m of mud) expect(rectsOverlap(g, m)).toBe(false);
+        for (const p of puddles) expect(rectsOverlap(g, p)).toBe(false);
       }
       for (const m of mud) {
         expect(rectsOverlap(m, centerBox)).toBe(false);
+        for (const p of puddles) expect(rectsOverlap(m, p)).toBe(false);
+      }
+      for (let i = 0; i < puddles.length; i++) {
+        const p = puddles[i]!;
+        expect(p.x).toBeGreaterThanOrEqual(centerBox.x);
+        expect(p.y).toBeGreaterThanOrEqual(centerBox.y);
+        expect(p.x + p.width).toBeLessThanOrEqual(centerBox.x + centerBox.width);
+        expect(p.y + p.height).toBeLessThanOrEqual(centerBox.y + centerBox.height);
+        for (let j = i + 1; j < puddles.length; j++) {
+          expect(rectsOverlap(p, puddles[j]!)).toBe(false);
+        }
+      }
+      if (level >= 3) {
+        const puddleArea = puddles.reduce((acc, r) => acc + rectArea(r), 0);
+        expect(puddleArea).toBeGreaterThan(prevPuddleArea);
+        prevPuddleArea = puddleArea;
       }
     }
   });
 
-  it('Startposition ist in allen Leveln sicher (auch bei Checkpoint-Resume)', () => {
+  it('Startposition ist in allen Leveln mit Sicherheitsabstand sicher (auch bei Checkpoint-Resume)', () => {
     for (const level of LEVELS) {
       const start = getStartPosition(level);
-      expect(isSafeSidePosition(start, level)).toBe(true);
+      expect(isSafeSidePosition(start, level, SIDE_CAT_RADIUS + 4)).toBe(true);
     }
   });
 
-  it('mindestens ein Grasfeld ist vom Start aus auf direktem geradem Weg ohne Schlamm erreichbar', () => {
+  it('Level 1–2 erlauben direkten Weg; ab Level 3 blockieren Pfützen den direkten Weg zum Gras', () => {
+    const hitsDirectPath = (level: number, target: Rect): boolean => {
+      const { mud, puddles, start } = getSideLayout(level);
+      const tx = Math.max(target.x, Math.min(start.x, target.x + target.width));
+      const ty = Math.max(target.y, Math.min(start.y, target.y + target.height));
+      const steps = 60;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const pos = { x: start.x + (tx - start.x) * t, y: start.y + (ty - start.y) * t };
+        if (circleRectOverlap(pos, SIDE_CAT_RADIUS, target)) return false;
+        if ([...mud, ...puddles].some((m) => circleRectOverlap(pos, SIDE_CAT_RADIUS, m))) return true;
+      }
+      return false;
+    };
+
+    for (const level of [1, 2]) {
+      const { grass } = getSideLayout(level);
+      expect(grass.some((g) => !hitsDirectPath(level, g))).toBe(true);
+    }
+
+    for (const level of [3, 4, 5, 6, 7]) {
+      const { grass } = getSideLayout(level);
+      expect(
+        grass.every((g) => hitsDirectPath(level, g)),
+        `Level ${level}: direkter Weg zum Gras soll durch Schlammpfütze blockiert sein`,
+      ).toBe(true);
+    }
+  });
+
+  it('in allen Leveln existiert ein passierbarer Umweg mit Korridorbreite >= 2.5 * CAT_RADIUS', () => {
+    const safeRadius = SIDE_CAT_RADIUS + 1; // Durchmesser 10 = 2.5 * SIDE_CAT_RADIUS
     for (const level of LEVELS) {
-      const { grass, mud, start } = getSideLayout(level);
-      const reachable = grass.some((target) => {
-        const tx = target.x + target.width / 2;
-        const ty = target.y + target.height / 2;
-        const steps = 40;
-        for (let i = 0; i <= steps; i++) {
-          const t = i / steps;
-          const pos = { x: start.x + (tx - start.x) * t, y: start.y + (ty - start.y) * t };
-          if (circleRectOverlap(pos, SIDE_CAT_RADIUS, target)) return true;
-          if (mud.some((m) => circleRectOverlap(pos, SIDE_CAT_RADIUS, m))) return false;
+      const { grass, mud, puddles, start } = getSideLayout(level);
+      const hazards = [...mud, ...puddles];
+      const visited = new Set<string>();
+      const queue: Array<{ x: number; y: number }> = [{ x: Math.round(start.x), y: Math.round(start.y) }];
+      visited.add(`${Math.round(start.x)},${Math.round(start.y)}`);
+      let reachedGrass = false;
+
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        if (grass.some((g) => circleRectOverlap(cur, SIDE_CAT_RADIUS, g))) {
+          reachedGrass = true;
+          break;
         }
-        return false;
-      });
-      expect(reachable, `Level ${level}: direkter Pfad zum Gras erwartet`).toBe(true);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          const nx = cur.x + dx;
+          const ny = cur.y + dy;
+          if (nx < SIDE_CAT_RADIUS || nx > 100 - SIDE_CAT_RADIUS) continue;
+          if (ny < SIDE_CAT_RADIUS || ny > 100 - SIDE_CAT_RADIUS) continue;
+          const key = `${nx},${ny}`;
+          if (visited.has(key)) continue;
+          if (hazards.some((h) => circleRectOverlap({ x: nx, y: ny }, safeRadius, h))) continue;
+          visited.add(key);
+          queue.push({ x: nx, y: ny });
+        }
+      }
+
+      expect(reachedGrass, `Level ${level}: Umweg zum Gras muss passierbar sein`).toBe(true);
     }
   });
 });

@@ -40,12 +40,13 @@ describe('SideExercise — Kontinuierliche Arena (Issue #52)', () => {
     expect(cat.textContent).toContain('🐱');
     expect(queryAllByTestId('side-grass')).toHaveLength(4);
     expect(queryAllByTestId('side-mud')).toHaveLength(0);
+    expect(queryAllByTestId('side-puddle')).toHaveLength(0);
     expect(container.textContent).toContain('Level 1');
   });
 
-  it('Level 5 Resume: Katze spawnt sicher bei (50%, 50%) und erreicht links Gras ohne Fehlermeldung', () => {
+  it('Level 5 Resume: gerader Weg links trifft innere Schlammpfütze, Umweg nach oben-links erreicht Gras', () => {
     const initialState = { ...createExerciseProgress(5), level: 5 };
-    const { container, getByTestId } = render(
+    const { container, getByTestId, queryAllByTestId } = render(
       <SideExercise
         ageGroup={6}
         seed="test-seed"
@@ -59,14 +60,61 @@ describe('SideExercise — Kontinuierliche Arena (Issue #52)', () => {
     expect(cat.style.left).toBe('50%');
     expect(cat.style.top).toBe('50%');
     expect(container.textContent).toContain('Level 5');
+    expect(queryAllByTestId('side-puddle').length).toBeGreaterThan(0);
 
     // Kurze Bewegung nach links bleibt im sicheren Bereich
     holdKeys(['ArrowLeft'], 160);
     expect(parseFloat(cat.style.left)).toBeLessThan(50);
     expect(cat.textContent).not.toContain('🙀');
 
-    // Weiter nach links in das linke Grasfeld (x <= 14)
-    holdKeys(['ArrowLeft'], 800);
+    // Weiter geradeaus nach links trifft die innere Schlammpfütze -> Fehler + Reset
+    holdKeys(['ArrowLeft'], 400);
+    expect(cat.textContent).toContain('🙀');
+    expect(streakLabel(container)).toBe('0 von 3 Sternen bis zum nächsten Level');
+
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(cat.style.left).toBe('50%');
+    expect(cat.style.top).toBe('50%');
+
+    // Umweg: zuerst nach oben über die Pfütze (y ≈ 24 %), dann links ins linke Grasfeld
+    holdKeys(['ArrowUp'], 580);
+    holdKeys(['ArrowLeft'], 900);
+    expect(cat.textContent).toContain('😸');
+    expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
+  });
+
+  it('Level 7 Slalom: gerader Weg nach oben trifft zentrale Pfütze, Slalom außen herum erreicht oberes Gras', () => {
+    const initialState = { ...createExerciseProgress(7), level: 7 };
+    const { container, getByTestId, queryAllByTestId } = render(
+      <SideExercise
+        ageGroup={6}
+        seed="test-seed"
+        initialState={initialState}
+        onComplete={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(queryAllByTestId('side-puddle')).toHaveLength(3);
+    const cat = getByTestId('arena-cat');
+
+    // Geradeaus nach oben trifft die zentrale Pfütze (y: 22..35)
+    holdKeys(['ArrowUp'], 450);
+    expect(cat.textContent).toContain('🙀');
+    expect(streakLabel(container)).toBe('0 von 3 Sternen bis zum nächsten Level');
+
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    // Slalom: hoch auf y≈40%, links an der Barriere vorbei auf x≈18%, hoch auf y≈16%, rechts und hoch ins Ziel
+    holdKeys(['ArrowUp'], 220);
+    holdKeys(['ArrowLeft'], 700);
+    holdKeys(['ArrowUp'], 540);
+    holdKeys(['ArrowRight'], 600);
+    holdKeys(['ArrowUp'], 220);
     expect(cat.textContent).toContain('😸');
     expect(streakLabel(container)).toBe('1 von 3 Sternen bis zum nächsten Level');
   });

@@ -4,7 +4,7 @@ import type { TrialFlash } from '../../../ui';
 import { createTrialGate, useExerciseEngine } from '../../engine';
 import { EXERCISE_CONFIGS } from '../../exerciseConfigs';
 import ArenaWorld from '../../shared/ArenaWorld';
-import { circleRectOverlap, clampPos, useAnimationLoop, type Vec2 } from '../../shared/arenaMath';
+import { circleRectOverlap, clampPos, useAnimationLoop, type Rect, type Vec2 } from '../../shared/arenaMath';
 import type { ExerciseProps } from '../../types';
 import { SIDE_CAT_RADIUS, SIDE_CAT_SIZE, getSideLayout, getStartPosition } from './maps';
 
@@ -47,9 +47,10 @@ export default function SideExercise({ onComplete, onCancel, initialState, onLev
     catPosRef.current = next;
     setCatPos(next);
 
-    if (layout.grass.some((r) => circleRectOverlap(next, SIDE_CAT_RADIUS, r))) {
+    const overlapsCat = (r: Rect) => circleRectOverlap(next, SIDE_CAT_RADIUS, r);
+    if (layout.grass.some(overlapsCat)) {
       handleTrialEnd(true);
-    } else if (layout.mud.some((r) => circleRectOverlap(next, SIDE_CAT_RADIUS, r))) {
+    } else if (layout.mud.some(overlapsCat) || layout.puddles.some(overlapsCat)) {
       handleTrialEnd(false);
     }
   }, inputEnabled);
@@ -91,6 +92,16 @@ export default function SideExercise({ onComplete, onCancel, initialState, onLev
           className="absolute bg-[radial-gradient(circle_at_30%_30%,#9c6b3c,#7a4a1f)] shadow-inner"
           style={{ left: `${r.x}%`, top: `${r.y}%`, width: `${r.width}%`, height: `${r.height}%` }}
         />
+      ))}
+      {layout.puddles.map((r, i) => (
+        <div
+          key={`puddle-${i}`}
+          data-testid="side-puddle"
+          className="absolute flex items-center justify-center rounded-2xl bg-[radial-gradient(circle_at_30%_30%,#9c6b3c,#7a4a1f)] shadow-inner border-2 border-[#5c3514]/50"
+          style={{ left: `${r.x}%`, top: `${r.y}%`, width: `${r.width}%`, height: `${r.height}%` }}
+        >
+          <span className="text-lg sm:text-xl opacity-60 select-none">💧</span>
+        </div>
       ))}
       {layout.grass.map((r, i) => (
         <div
